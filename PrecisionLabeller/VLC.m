@@ -11,7 +11,7 @@ classdef VLC < matlab.mixin.SetGet
     Port = 4212;
   end
   
-  properties (SetAccess = private)
+  properties (SetAccess = private, SetObservable = true, GetObservable = true)
     Version
     Status
     Current
