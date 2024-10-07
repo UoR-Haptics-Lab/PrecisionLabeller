@@ -12,20 +12,23 @@ classdef FileHandler < DataLabellingTool
         %
         % Output    : struct, format of DataLabellingTool
         function obj = importFiles(filePath)
-            [~,~,ext] = fileparts(filePath); % Extract file type
+            [~, ~, ext] = fileparts(filePath); % Extract file type
           
             % Processing .ini files
             if strcmp(ext, '.ini')
                 % Empty fields : DefaultFilePath, SaveFileName, Sensors, Plots
-                obj.DefaultFilePath = filePath; obj.SaveFileName = ""; obj.Sensors = struct(); obj.Plots = struct();
+                obj.DefaultFilePath = filePath; 
+                obj.SaveFileName    = ""; 
+                obj.Sensors         = struct();
+                obj.Plots           = struct();
+                obj.GroundTruth     = struct();
                 
-                % Loaded fields:LabelFolderPath, FilePaths, LoadedVersion, GroundTruth, Files
+                % Loaded fields:LabelFolderPath, FilePaths, LoadedVersion, Files
                 %   Import filepaths parsing .ini file
                 [obj.LabelFolderPath, obj.FilePaths, tmpData] = FileHandler.importIniPaths(filePath);
-                %   Load ground truth from parsed folderpath
-                [obj.LoadedVersion, obj.GroundTruth]          = FileHandler.loadLatestLabel(obj.LabelFolderPath);
+
                 %   Load files from parsed filepaths
-                obj.Files                                     = FileHandler.loadFiles(obj.FilePaths, tmpData);
+                obj.Files = FileHandler.loadFiles(obj.FilePaths, tmpData);
                 return
             end
             
@@ -52,12 +55,11 @@ classdef FileHandler < DataLabellingTool
         %                   tmpData will be passed into loadFiles() to load
         %                   SensorFiles and VideoFiles.
         function [LabelFolderPath, FilePaths, tmpData] = importIniPaths(filePath)
-            tmpData      = struct();             % tmp struct
-            fileID       = fopen(filePath, 'r'); % fileID of input filepath
-            videoFileIdx = 0;                    % Idx to scan for Offset data
+            tmpData = struct();             % temp struct
+            fileID  = fopen(filePath, 'r'); % fileID of input filepath
             
             % List of sections allowed
-            validSections = {'SensorFiles', 'VideoFiles', 'LabelFolder', 'ClassList'};
+            validSections = {'SensorFiles', 'VideoFiles', 'LabelFolder', 'ClassList', 'Offset'};
 
             % Read every line of the ini file
             while ~feof(fileID)
@@ -68,12 +70,16 @@ classdef FileHandler < DataLabellingTool
                 % Check for section headers, Check for section name
                 if startsWith(line, '[') && endsWith(line, ']')
                     currentSection = strtrim(line(2:end-1)); % Store current section
+                    
                     % If not valid section, current section = 'NULL', contiue next line
                     if ~ismember(currentSection, validSections); currentSection = 'NULL'; continue; end
+                    
                     % If [LabelFolder], contiue next line
                     if strcmp(currentSection, 'LabelFolder'); continue; end
+                    
                     % If [ClassList], create hashmap, contiue next line
                     if strcmp(currentSection, 'ClassList'); tmpData.(currentSection) = containers.Map; continue; end
+                    
                     % If [SensorFiles] or [VideoFiles], create section field with struct, contiue next line
                     tmpData.(currentSection) = struct(); continue;
                 end
@@ -84,28 +90,24 @@ classdef FileHandler < DataLabellingTool
                     key      = strtrim(line(1:valueIdx(1)-1));               % Parse Key before '='
                     value    = strtrim(erase(line(valueIdx(1)+1:end), '"')); % Parse Value after '='
                     
-                    % Process 'VideoFiles' Offset
-                    if strcmp(currentSection, 'VideoFiles')
-                        % If Not first file, Key same as previous Key,Value is numeric
-                        if videoFileIdx > 0 && strcmp(currentVideo, key) && isnumeric(str2double(value))
-                            % Set Key name is 'KEY_Offset', Assign offset value
-                            tmpData.VideoFiles.(append(key,'_Offset')) = str2double(value);
-                            videoFileIdx                               = videoFileIdx + 1; % Update index
-                            continue;
-                        end
-                        videoFileIdx = videoFileIdx + 1; % Update index as well, if nothing happens
-                        currentVideo = key;              % Update 'previous' key
+                    % Process 'Offset'
+                    if strcmp(currentSection, 'Offset')
+                        tmpData.Offset.(key) = value; continue;
                     end
                 
                     % Process 'LabelFolder' 
-                    if strcmp(currentSection,'LabelFolder'); LabelFolderPath = value; continue; end
+                    if strcmp(currentSection,'LabelFolder')
+                        LabelFolderPath = value; continue; 
+                    end
                 
                     % Process 'ClassList'
                     if strcmp(currentSection, 'ClassList')
+
                         % If Not a number, throw error
                         if isnan(str2double(key))
                             ErrorHandler.raiseError('InvalidClass', 'FileHandler', key, value, currentSection).throwAsCaller;
                         end
+
                         % If is number assign class
                         tmpData.ClassList(key) = value; continue;
                     end
@@ -122,41 +124,6 @@ classdef FileHandler < DataLabellingTool
             fclose(fileID);
         end
         
-        %% Arguments: loadLatestLabel(LabelFolderPath)
-        %
-        %  Function : Find latest file in label folder
-        %             Load found latest file
-        %
-        %  Output   : LoadedVersion, GroundTruth
-        function [LoadedVersion, GroundTruth] = loadLatestLabel(LabelFolderPath)
-            fileList = dir(LabelFolderPath);
-            % Remove '.' and '..' which are the current and parent directory
-            fileList = fileList(~ismember({fileList.name}, {'.', '..'}));
-            % Skip empty file list
-            if isempty(fileList); GroundTruth = timetable(); LoadedVersion = ""; return; end
-            
-            
-            modDates           = [fileList.datenum];  % Extract modification dates
-            [~, idx]           = max(modDates);       % Find index of the most recent file
-            mostRecentFile     = fileList(idx);       % Get most recent file
-            mostRecentFilePath = fullfile(LabelFolderPath, mostRecentFile.name);
-            
-            % If Not a folder, load file, store ground truth
-            if ~isfolder(mostRecentFilePath)
-                tmp = load(mostRecentFilePath, 'variable');
-                
-                if ~istimetable(tmp.variable)   % Not Timetable
-                    GroundTruth = timetable();  % Return empty
-                else                            % Is Timetable
-                    GroundTruth = tmp.variable; % Return loaded
-                end
-
-                LoadedVersion = mostRecentFilePath;
-                disp("Current Loaded Version: ");
-                disp(LoadedVersion)
-            end
-        end
-
         %% Arguments: loadFiles(filePath)
         %
         %  Function : fetch parsed filepaths
@@ -174,8 +141,7 @@ classdef FileHandler < DataLabellingTool
                 % Loop over each struct
                 for j = 1:numel(subFields)
                     fieldName = subFields{j};
-                    filePath = sectionStruct.(fieldName);
-                    if contains(fieldName,'Offset'); continue; end
+                    filePath  = sectionStruct.(fieldName);
                     % Call the categorisation function
                     categorise(filePath, fieldName, section{i});
                 end
@@ -185,106 +151,132 @@ classdef FileHandler < DataLabellingTool
             % (Private)
             function categorise(filePath, fieldName, field)
                 sensorFileTypes = {'.csv', '.xlsx', '.mat'};
-                videoFileTypes = {'.mp4', '.MP4'};
+                videoFileTypes  = {'.mp4', '.MP4'};
+                
                 % Skip empty file paths
                 if isempty(filePath); return; end
+                
                 % If not file/not accessible, throw error
                 if ~isfile(filePath)
                     ErrorHandler.raiseError('InvalidFile', 'FileHandler', filePath).throwAsCaller;
                 end
+                
                 % Get file extension of file
                 [~, ~, ext] = fileparts(filePath);
                 
-                % Check if the file is a sensor file (.csv, .xlsx)
+                % Check if the file is a sensor file (.csv, .xlsx, .mat)
                 if strcmp(field, "SensorFiles")
-                    if ismember(ext, sensorFileTypes)
-                        disp(['Sensor file detected: ', filePath]);
-                        if strcmpi(ext, '.mat'); tmpData.SensorFiles.(fieldName) = load(filePath);
-                        else; tmpData.SensorFiles.(fieldName) = readtable(filePath, 'VariableNamingRule', 'preserve');
-                        end
-                    else % Not of type, throw error
+                    disp(['Sensor file detected: ', filePath]);
+                    % Not of expected type, throw error
+                    if ~ismember(ext, sensorFileTypes)
                         ErrorHandler.raiseError('InvalidType','FileHandler:SensorFiles', sensorFileTypes, filePath).throwAsCaller;
+                    end
+                    
+                    if strcmpi(ext, '.mat')
+                        % Process .mat files separately
+                        tmp = load(filePath);
+                        tmpData.SensorFiles.(fieldName) = tmp.Tbl;
+                    else
+                        % Process .csv, .xlsx separately
+                        tmpData.SensorFiles.(fieldName) = readtable(filePath, 'VariableNamingRule', 'preserve');
                     end
                 end
 
                 % Check if the file is a video file (.mp4, .MP4)
                 if strcmp(field, "VideoFiles") 
-                    if ismember(ext, videoFileTypes)
-                        disp(['Video file detected: ', filePath]);
-                        tmpData.VideoFiles.(fieldName) = filePath;  % Store the video file path
-                        return;
-                    else % Not of type, throw error
+                    disp(['Video file detected: ', filePath]);
+                    % Not of expected type, throw error
+                    if ~ismember(ext, videoFileTypes)
                         ErrorHandler.raiseError('InvalidType','FileHandler:VideoFiles', videoFileTypes, filePath).throwAsCaller;
                     end
+                    
+                    % Store the video file path
+                    tmpData.VideoFiles.(fieldName) = filePath;
                 end
             end
-        
             % Return modified tmpData structure
             Files = tmpData;
         end
         
         %% Arguments: newLabelFile(caller)
         %
-        %  Function : Generates new label file
-        %             Find Largest Sensor size
-        %             Create a timetable of found size
-        %               (Label:0, Class:'Undefined')
-        %             Save new label file, Output new timetable
-        %             Update loaded version
+        %  Function : creates a clean set of labels for all sensors
+        %             overwrites current sensor labels to 'Undefined'
+        %             Tests if caller.saveName is empty, prompts new file name
         function newLabelFile(caller)
-            sensors = fieldnames(caller.Sensors);
-            maxSize = 0;
-            
-            % Find largest dataset height
-            for i=1:(numel(sensors))            
-                tmpSize = height(caller.Sensors.(sensors{i}));
-                if maxSize > tmpSize % Skip if size is less than max
-                    continue;
-                end
-                % Save current size as max size if larger than max
-                maxSize = tmpSize;
-                timeCol = caller.Sensors.(sensors{i}).Properties.DimensionNames{1};
-                maxTime = caller.Sensors.(sensors{i}).(timeCol)(maxSize);
+            sensors     = caller.Sensors;
+            sensorNames = fieldnames(caller.Sensors);
+            for i=1:numel(sensorNames)
+                currentSensor = sensorNames{i};
+                sensors.(currentSensor).Label = zeros(height(sensors.(currentSensor)), 1);
+                sensors.(currentSensor).Class = repmat("Undefined", height(sensors.(currentSensor)), 1);
             end
-
-            % Generate uniform values
-            Time = linspace(0, maxTime, maxSize)';
-            Label = zeros(maxSize,1); % Generate initial Null labels
-            Class = repmat("Undefined",maxSize,1);
-            % Create a new timetable
-            groundTruth = timetable(Label, Class, 'RowTimes', Time);
-            % Save new label file
-            FileHandler.saveFile(caller, groundTruth, caller.SaveFileName, caller.LabelFolderPath);
-            % Set new file as loaded version
-            caller.GroundTruth = groundTruth;
-            caller.LoadedVersion = fullfile(caller.LabelFolderPath,caller.SaveFileName);
         end
-        
+
         %% Arguments: saveFile(caller, variable, fileName)
         %             saveFile(caller, variable, fileName, folderPath)
         %
         %  Function : Saves given variable in a .mat file
         %             Tests if caller.saveName is empty, prompts new file name
+        %
+        %  Output   : A save file in 'FILENAME_dd-MM-yyyy_HH-mm-ss'
+        %                            'FOLDER/FILENAME_dd-MM-yyyy_HH-mm-ss'
         function saveFile(caller, variable, varargin)
-            time        = datetime("now");                                 
+            % Declare local variables
+            time        = datetime("now");
             time.Format = ('dd-MM-yyyy_HH-mm-ss');
+            
+            % Switch number of arguments
             switch numel(varargin)
-                case 1 % (caller, variable, folderPath)
-                    filePath = append(varargin{1},'_',char(time)); % 'FILENAME_dd-MM-yyyy_HH-mm-ss'
-                case 2 % (caller, variable, caller.saveName, folderPath)
-                    if ~strcmp(varargin{1},"")
-                        % 'FOLDER/FILENAME_dd-MM-yyyy_HH-mm-ss'
-                        filePath            = fullfile(varargin{2},append(varargin{1}, '_', char(time)));
-                    else
-                        % 'FOLDER/FILENAME_dd-MM-yyyy_HH-mm-ss'
-                        fileName            = input("Enter File Name: ",'s');
-                        caller.SaveFileName = fileName;
-                        filePath            = fullfile(varargin{2},append(fileName, '_', char(time)));
+                case 1 % saveFile(caller, variable, saveName)
+                    saveName = varargin{1};
+                    % Update path to 'FILENAME_dd-MM-yyyy_HH-mm-ss'
+                    filePath = append(saveName, '_', char(time));
+                
+                case 2 % saveFile(caller, variable, saveName, folderPath)
+                    saveName   = varargin{1};
+                    folderPath = varargin{2};
+
+                    % if saveName is empty, prompt for new saveName
+                    if strcmpi(saveName, "")
+                        caller.EditFlag = false;
+                        fileName            = inputdlg("Enter File Name: ", 'File Name');
+                        caller.SaveFileName = fileName{1};
+                        saveName = fileName{1};
                     end
+                    % Update path to 'FOLDER/FILENAME_dd-MM-yyyy_HH-mm-ss'
+                    filePath = fullfile(folderPath, append(saveName, '_', char(time)));
                 otherwise
             end
-            save(filePath,'variable');
+            save(filePath, 'variable');
             fprintf('Saved File Path: %s\n',filePath);
+        end
+
+        %% Arguments: loadLabel(caller, filePath)
+        % 
+        %  Function : loads specified label file to available sensors
+        function loadLabel(caller, filePath)
+            % Declare local variables
+            tmp         = load(filePath, 'variable'); % Load from save
+            sensorNames = fieldnames(tmp.variable);   % Get fields from save
+            % Loop over fields
+            for i=1:numel(sensorNames)
+                currentSensor = sensorNames{i};
+                
+                % if current instance does not include sensor in save, skip field
+                if ~isfield(caller.Sensors, currentSensor)
+                    warning("[%s] NOT imported, No sensor is named %s in this instance.", currentSensor, currentSensor);
+                    continue;
+                end
+                
+                % Overwrite current sensors
+                caller.Sensors.(currentSensor).Label = tmp.variable.(currentSensor).Label;
+                caller.Sensors.(currentSensor).Class = tmp.variable.(currentSensor).Class;
+            end
+            
+            caller.GroundTruth = tmp.variable;
+            % Update loaded version
+            caller.LoadedVersion = filePath;
         end
     end
 end
