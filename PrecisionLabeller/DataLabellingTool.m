@@ -14,6 +14,7 @@
 % All Publicly Accessible Methods
 %   init()
 %   loadFiles(obj, filePath)
+%   import(obj, varargin)
 %   savePreset(obj, fileName)
 %   addSensors(obj, varargin)
 %   removeSensors(obj, sensorName)
@@ -39,7 +40,7 @@ classdef DataLabellingTool < handle
         Files           struct    = struct()     % Data loaded from DataPath
         LabelFolderPath char      = ""           % Label folder path
         LoadedVersion   char      = ""           % Current loaded label version
-        SaveFileName    char      = "SavedLabel" % Label Save File Name (Format: FILENAME_DD-MM-YYYY_HH-MM-SS.mat)
+        SaveFileName    char      = "SaveFile" % Label Save File Name (Format: FILENAME_DD-MM-YYYY_HH-MM-SS.mat)
         Sensors         struct    = struct()     % Imported Sensor Files
         Plots           struct    = struct()     % All current plots from this instance
     end
@@ -118,7 +119,7 @@ classdef DataLabellingTool < handle
             if ~isempty(obj.Listeners); cellfun(@delete,obj.Listeners); end
             
             % Return newly constructed obj
-            loadedObj = FileHandler.importFiles(filePath); % Calling FileHandler
+            loadedObj = FileHandler.importFiles(filePath, obj.Files); % Calling FileHandler
             % Overwrite current properties
             obj.DefaultFilePath = loadedObj.DefaultFilePath;
             obj.FilePaths       = loadedObj.FilePaths;
@@ -136,7 +137,28 @@ classdef DataLabellingTool < handle
             disp(obj);
         end
         
-        %% Usage(2): savePreset()            default Input: "preload"
+        %% Usage   : import()
+        %
+        % Function : import specified files in respective place according
+        %            to the file type
+        function import(obj, varargin)
+            [fileName, dir] = uigetfile("*", 'MultiSelect', 'on');
+            if ~iscell(fileName)
+                filePath = fullfile(dir, fileName);
+                try name = varargin{1}; catch; name = ""; end
+                obj.Files = FileHandler.categorise(filePath, name, obj.Files);
+                return
+            end
+
+            for i=1:numel(fileName)
+                if iscell(fileName); filePath = fullfile(dir, fileName{i}); end
+
+                try name = varargin{1}; catch; name = ""; end
+                obj.Files = FileHandler.categorise(filePath, name, obj.Files);
+            end
+        end
+
+        %% Usage(2): savePreset()          default Input: "preload"
         %          : savePreset(fileName)
         %
         % Function : saves current instance properties in given fileName
@@ -149,7 +171,7 @@ classdef DataLabellingTool < handle
             FileHandler.saveFile(obj, obj, fileName); % Calling File Handler
         end
        
-        %% Usage(5): addSensors()       % default Input: ALL SensorFiles
+        %% Usage(5): addSensors()           default Input: ALL SensorFiles
         %            addSensors(sensorFile)
         %            addSensors(sensorFile, newSensorName)
         %            addSensors(sensorFile, sensorFileName, newSensorName)
@@ -160,14 +182,31 @@ classdef DataLabellingTool < handle
         %            if no input is given
         function addSensors(obj, varargin)
             obj.Sensors = SensorManager.addSensors(obj.Sensors, obj.Files.SensorFiles, varargin{:});
-            
-            % Display new struct
-            disp("Current Sensors:");
+            disp("Current Sensors:"); % Display new struct
             disp(obj.Sensors);
         end
 
+        %% Usage   : changeTimeRow()
+        %
+        % Function : changes time row for selected sensor
         function changeTimeRow(obj, sensorName, newCol)
-            SensorManager.changeTimeRow(obj, sensorName, newCol);
+            SensorManager.changeTimeRow(obj, sensorName, newCol); % Calling SensorManager
+        end
+
+        %% Usage   : changeSaveName()
+        %
+        % Function : changes save file name of tool
+        function changeSaveName(obj)
+            fprintf("\nCurrent Save File Name: %s\n", obj.SaveFileName)
+            saveName = input("Enter New Save Name: ","s");
+            
+            if ~isvarname(saveName)
+                ErrorHandler.raiseError("InvalidFileName", "DataLabellingTool", saveName).throw;
+                return;
+            end
+
+            obj.SaveFileName = saveName;
+            disp(obj);
         end
 
         %% Usage   : removeSensors(sensorName)
@@ -180,9 +219,7 @@ classdef DataLabellingTool < handle
                 sensorName {mustBeText}
             end
             obj.Sensors = SensorManager.removeSensors(obj.Sensors,sensorName); % Calling SensorManager
-            
-            % Display new struct
-            disp("Current Sensors:");
+            disp("Current Sensors:"); % Display new struct
             disp(obj.Sensors);
         end
         

@@ -11,7 +11,7 @@ classdef FileHandler < DataLabellingTool
         %             Load .mat
         %
         % Output    : struct, format of DataLabellingTool
-        function obj = importFiles(filePath)
+        function obj = importFiles(filePath, currentData)
             [~, ~, ext] = fileparts(filePath); % Extract file type
           
             % Processing .ini files
@@ -25,8 +25,8 @@ classdef FileHandler < DataLabellingTool
                 
                 % Loaded fields:LabelFolderPath, FilePaths, LoadedVersion, Files
                 %   Import filepaths parsing .ini file
-                [obj.LabelFolderPath, obj.FilePaths, tmpData] = FileHandler.importIniPaths(filePath);
-
+                [obj.LabelFolderPath, obj.FilePaths, tmpData] = FileHandler.parseIniPaths(filePath, currentData);
+                
                 %   Load files from parsed filepaths
                 obj.Files = FileHandler.loadFiles(obj.FilePaths, tmpData);
                 return
@@ -43,7 +43,7 @@ classdef FileHandler < DataLabellingTool
             ErrorHandler.raiseError('InvalidType',"FileHandler",{".ini",".mat"},which(filePath)).throwAsCaller;
         end
         
-        %% Arguments: importIniPaths(filePath)
+        %% Arguments: parseIniPaths(filePath)
         %
         %  Function : Parse .ini, put in sections
         %
@@ -54,8 +54,8 @@ classdef FileHandler < DataLabellingTool
         %                   not yet loaded in, it cannot be a full files section.
         %                   tmpData will be passed into loadFiles() to load
         %                   SensorFiles and VideoFiles.
-        function [LabelFolderPath, FilePaths, tmpData] = importIniPaths(filePath)
-            tmpData = struct();             % temp struct
+        function [LabelFolderPath, FilePaths, tmpData] = parseIniPaths(filePath, currentData)
+            disp(currentData)
             fileID  = fopen(filePath, 'r'); % fileID of input filepath
             
             % List of sections allowed
@@ -71,16 +71,16 @@ classdef FileHandler < DataLabellingTool
                 if startsWith(line, '[') && endsWith(line, ']')
                     currentSection = strtrim(line(2:end-1)); % Store current section
                     
-                    % If not valid section, current section = 'NULL', contiue next line
+                    % If not valid section, current section = 'NULL', continue next line
                     if ~ismember(currentSection, validSections); currentSection = 'NULL'; continue; end
                     
-                    % If [LabelFolder], contiue next line
+                    % If [LabelFolder], continue next line
                     if strcmp(currentSection, 'LabelFolder'); continue; end
                     
-                    % If [ClassList], create hashmap, contiue next line
+                    % If [ClassList], create hashmap, continue next line
                     if strcmp(currentSection, 'ClassList'); tmpData.(currentSection) = containers.Map; continue; end
                     
-                    % If [SensorFiles] or [VideoFiles], create section field with struct, contiue next line
+                    % If [SensorFiles] or [VideoFiles], create section field with struct, continue next line
                     tmpData.(currentSection) = struct(); continue;
                 end
                 
@@ -117,6 +117,7 @@ classdef FileHandler < DataLabellingTool
                     if ~isvarname(key)
                         ErrorHandler.raiseError('InvalidKey', 'FileHandler', key, currentSection).throwAsCaller;
                     end
+
                     % Assign values to key field
                     FilePaths.(currentSection).(key) = value;
                 end
@@ -131,71 +132,96 @@ classdef FileHandler < DataLabellingTool
         %
         %  Output   : Files (SensorFiles, VideoFiles, ClassList)
         function Files = loadFiles(FilePaths, tmpData)
-            % section is [SensorFiles], [VideoFiles]
-            section = fieldnames(FilePaths);
-            % Loop over each section
-            for i = 1:numel(section)
-                sectionStruct = FilePaths.(section{i});    % struct of section
-                subFields     = fieldnames(sectionStruct); % fieldnames of struct
+            sections = fieldnames(FilePaths);  % Get section names (e.g., [SensorFiles], [VideoFiles])
+        
+            % Loop over each section (e.g., SensorFiles, VideoFiles)
+            for i = 1:numel(sections)
+                sectionStruct = FilePaths.(sections{i});  % Get the struct of the current section
+                subFields = fieldnames(sectionStruct);    % Get the subfields (e.g., filenames)
                 
-                % Loop over each struct
+                % Loop over each file in the section
                 for j = 1:numel(subFields)
-                    fieldName = subFields{j};
-                    filePath  = sectionStruct.(fieldName);
-                    % Call the categorisation function
-                    categorise(filePath, fieldName, section{i});
+                    filePath = sectionStruct.(subFields{j});  % Get the file path
+                    tmpData = FileHandler.categorise(filePath, subFields{j}, tmpData);  % Categorize the file
                 end
             end
             
-            % Nested function to categorise files based on their extensions
-            % (Private)
-            function categorise(filePath, fieldName, field)
-                sensorFileTypes = {'.csv', '.xlsx', '.mat'};
-                videoFileTypes  = {'.mp4', '.MP4'};
-                
-                % Skip empty file paths
-                if isempty(filePath); return; end
-                
-                % If not file/not accessible, throw error
-                if ~isfile(filePath)
-                    ErrorHandler.raiseError('InvalidFile', 'FileHandler', filePath).throwAsCaller;
-                end
-                
-                % Get file extension of file
-                [~, ~, ext] = fileparts(filePath);
-                
-                % Check if the file is a sensor file (.csv, .xlsx, .mat)
-                if strcmp(field, "SensorFiles")
-                    disp(['Sensor file detected: ', filePath]);
-                    % Not of expected type, throw error
-                    if ~ismember(ext, sensorFileTypes)
-                        ErrorHandler.raiseError('InvalidType','FileHandler:SensorFiles', sensorFileTypes, filePath).throwAsCaller;
-                    end
-                    
-                    if strcmpi(ext, '.mat')
-                        % Process .mat files separately
-                        tmp = load(filePath);
-                        tmpData.SensorFiles.(fieldName) = tmp.Tbl;
-                    else
-                        % Process .csv, .xlsx separately
-                        tmpData.SensorFiles.(fieldName) = readtable(filePath, 'VariableNamingRule', 'preserve');
+            Files = tmpData;  % Return the modified data
+        end
+
+            
+        %% Arguments: categorise(filePath, name, tmpData)
+        %
+        %  Function : load filepaths according to their file types
+        %             add loaded data into tmpData
+        %
+        %  Output   : Files (SensorFiles, VideoFiles, ClassList)
+        function newData = categorise(filePath, name, tmpData)
+            sensorFileTypes = {'.csv', '.xlsx', '.mat'};
+            videoFileTypes  = {'.mp4', '.MP4'};
+            
+            % Skip empty file paths
+            if isempty(filePath); return; end
+            
+            % If not file/not accessible, throw error
+            if ~isfile(filePath)
+                ErrorHandler.raiseError('InvalidFile', 'FileHandler', filePath).throwAsCaller;
+            end
+
+            % Get file extension of file
+            [~, ~, ext] = fileparts(filePath);
+
+            if ~ismember(ext, [sensorFileTypes videoFileTypes])
+                % Not of expected type, throw error
+                ErrorHandler.raiseError('InvalidType','FileHandler:FileImport', [sensorFileTypes videoFileTypes], filePath).throwAsCaller;
+            end
+            
+            % Check if the file is a sensor file (.csv, .xlsx, .mat)
+            if ismember(ext, sensorFileTypes)
+                disp(['Sensor file detected: ', filePath]);
+
+                if strcmpi(name, "")
+                    try
+                        name = append("SensorFile", string(numel(fieldnames(tmpData.SensorFiles)) + 1 ));
+                    catch
+                        name = "SensorFile1";
                     end
                 end
 
-                % Check if the file is a video file (.mp4, .MP4)
-                if strcmp(field, "VideoFiles") 
-                    disp(['Video file detected: ', filePath]);
-                    % Not of expected type, throw error
-                    if ~ismember(ext, videoFileTypes)
-                        ErrorHandler.raiseError('InvalidType','FileHandler:VideoFiles', videoFileTypes, filePath).throwAsCaller;
-                    end
-                    
-                    % Store the video file path
-                    tmpData.VideoFiles.(fieldName) = filePath;
+                % Process .mat files
+                if strcmpi(ext, '.mat')
+                    tmp = load(filePath);
+                    tmpData.SensorFiles.(name) = tmp.Tbl;
+                    disp(tmpData.SensorFiles);
+                    newData = tmpData;
+                    return
                 end
+
+                % Process .csv, .xlsx
+                tmpData.SensorFiles.(name) = readtable(filePath, 'VariableNamingRule', 'preserve');
+                disp(tmpData.SensorFiles);
+                newData = tmpData;
+                return;
             end
-            % Return modified tmpData structure
-            Files = tmpData;
+
+            % Check if the file is a video file (.mp4, .MP4)
+            if ismember(ext, videoFileTypes)
+                disp(['Video file detected: ', filePath]);
+                
+                if strcmpi(name, "")
+                    try
+                        name = append("VideoFile", string( numel(fieldnames(tmpData.VideoFiles)) + 1 ));
+                    catch
+                        name = "VideoFile1";
+                    end
+                end
+
+                % Process VideoFiles
+                tmpData.VideoFiles.(name) = filePath;
+                disp(tmpData.VideoFiles);
+                newData = tmpData;
+                return;
+            end
         end
         
         %% Arguments: newLabelFile(caller)
@@ -240,7 +266,7 @@ classdef FileHandler < DataLabellingTool
                     % if saveName is empty, prompt for new saveName
                     if strcmpi(saveName, "")
                         caller.EditFlag = false;
-                        fileName            = inputdlg("Enter File Name: ", 'File Name');
+                        fileName = "saveFile";
                         caller.SaveFileName = fileName{1};
                         saveName = fileName{1};
                     end
