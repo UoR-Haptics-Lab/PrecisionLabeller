@@ -1,6 +1,6 @@
 
-# PrecisionLabeler
-PrecisionLabeler is a MATLAB-based application for precise data labeling and visualisation. It allows users to scrub through the data or video to apply labels. 
+# PrecisionLabeller
+PrecisionLabeller is a MATLAB-based application for precise data labelling and visualisation. It allows users to scrub through the data or video to apply labels. 
 
 Data are referenced to each other using a nearest-neighbor interpolation method. They are synchronised to a video clip through a user-defined offset to calculate the approximate data time.
 
