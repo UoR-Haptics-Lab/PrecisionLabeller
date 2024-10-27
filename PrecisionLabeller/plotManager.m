@@ -93,16 +93,14 @@ classdef PlotManager < DataLabellingTool
             currentPlot.Handle.DeleteFcn             = @(~,~)removePlot(caller,plotName);
             % Add zoom pan fix to initialised plot
             % This is needed for labelling system
+
             % When user pans, zooms, or use the annoying gui buttons,
             % matlab changes its mode and locks all pre-configured
             % KeyPressFcn. Now we want to edit the labels even if the mode has changed. 
-            % So I have made this function to overwrite matlab's original local lock. 
+            % So I have written this function to overwrite matlab's original local lock. 
             % Every time the figure sees our user using a new mode of
             % the figure, we revert the KeyPressFcn to what was set.
             PlotManager.zoomPanFixPlot(caller, currentPlot.Handle, plotName);
-
-            % However, this revert system is not applied to scrubbing video through plot. 
-            % When zooming, panning or etc, it is best to leave the indicator to where it is.
 
             %%% General plot properties
             title(plotName);
@@ -150,8 +148,7 @@ classdef PlotManager < DataLabellingTool
             function updateKeyPressFcn()
                 % Turn off warning telling me invalid property, 
                 % I think this happens when you change the mode too fast and
-                % the lock comes back before it finished restoring the
-                % KeyPressFcn.
+                % the lock comes back before it finished restoring the KeyPressFcn.
                 warning('off', 'MATLAB:modes:mode:InvalidPropertySet');
 
                 % Based on the solution described by Yair Altman at
@@ -174,7 +171,7 @@ classdef PlotManager < DataLabellingTool
         %             Calls update Label to update ground truth 
         %             if user is editing
         function updateIndicator(caller, videoTime)
-            % Disable annoying warning
+            % Disable warning
             % The warning happens sometimes because the
             % plot is being deleted or vlc is being disconnected
             % so the indicator is gone, we cannot read/write data onto the

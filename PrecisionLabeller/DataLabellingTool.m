@@ -15,6 +15,7 @@
 %   init()
 %   loadFiles(obj, filePath)
 %   import(obj, varargin)
+%   removeFiles(fileName)
 %   savePreset(obj, fileName)
 %   addSensors(obj, varargin)
 %   removeSensors(obj, sensorName)
@@ -40,7 +41,7 @@ classdef DataLabellingTool < handle
         Files           struct    = struct()     % Data loaded from DataPath
         LabelFolderPath char      = ""           % Label folder path
         LoadedVersion   char      = ""           % Current loaded label version
-        SaveFileName    char      = "SaveFile" % Label Save File Name (Format: FILENAME_DD-MM-YYYY_HH-MM-SS.mat)
+        SaveFileName    char      = "SaveFile"   % Label Save File Name (Format: FILENAME_DD-MM-YYYY_HH-MM-SS.mat)
         Sensors         struct    = struct()     % Imported Sensor Files
         Plots           struct    = struct()     % All current plots from this instance
     end
@@ -108,7 +109,7 @@ classdef DataLabellingTool < handle
         %          : loadFiles(filePath)
         %
         % Function : load files from type .ini or .mat
-        %            Parse a .ini and load corresponding filepaths
+        %            Parse an .ini and load corresponding filepaths
         %            Load a .mat and load corresponding variables
         function loadFiles(obj, filePath)
             arguments (Input)
@@ -137,25 +138,51 @@ classdef DataLabellingTool < handle
             disp(obj);
         end
         
-        %% Usage   : import()
+        %% Usage(2): import()       default: prompts file path through gui
+        %            import(filePaths)
         %
-        % Function : import specified files in respective place according
+        % Function : import specified files into respective fields according
         %            to the file type
         function import(obj, varargin)
-            [fileName, dir] = uigetfile("*", 'MultiSelect', 'on');
+            % No specified file path, open GUI
+            if numel(varargin) == 0
+                [fileName, dir] = uigetfile({'*.csv ;*.xlsx ;*.mat; *.mp4; *.MP4'}, 'MultiSelect', 'on');
+            % Received specified file paths
+            else
+                dir = "";
+                fileName = varargin;
+            end
+            
+            % Single File Import
             if ~iscell(fileName)
                 filePath = fullfile(dir, fileName);
-                try name = varargin{1}; catch; name = ""; end
-                obj.Files = FileHandler.categorise(filePath, name, obj.Files);
+                obj.Files = FileHandler.categorise(filePath, "", obj.Files);
                 return
             end
-
+            
+            % Multiple File Import
             for i=1:numel(fileName)
-                if iscell(fileName); filePath = fullfile(dir, fileName{i}); end
-
-                try name = varargin{1}; catch; name = ""; end
+                filePath = fullfile(dir, fileName{i});
+                try name = fileName{i}; catch; name = ""; end
                 obj.Files = FileHandler.categorise(filePath, name, obj.Files);
             end
+        end
+        
+        %% Usage   : removeFiles(fileName)
+        %
+        % Function : remove specified imported files from DataLabellingTool
+        function removeFiles(obj, fileName)
+            fields = fieldnames(obj.Files);
+            for i=1:numel(fields)
+                if isfield(obj.Files.(fields{i}), fileName)
+                    obj.Files.(fields{i}) = rmfield(obj.Files.(fields{i}), fileName);
+                    fprintf("Current %s: \n", fields{i});
+                    disp(obj.Files.(fields{i}));
+                    return
+                end
+            end
+            % File name not found, throw error
+            ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Files", fileName, [fieldnames(obj.Files.SensorFiles) fieldnames(obj.Files.VideoFiles)]).throw;
         end
 
         %% Usage(2): savePreset()          default Input: "preload"
@@ -200,6 +227,7 @@ classdef DataLabellingTool < handle
             fprintf("\nCurrent Save File Name: %s\n", obj.SaveFileName)
             saveName = input("Enter New Save Name: ","s");
             
+            % Not a valid variable name, throw error
             if ~isvarname(saveName)
                 ErrorHandler.raiseError("InvalidFileName", "DataLabellingTool", saveName).throw;
                 return;
@@ -234,7 +262,7 @@ classdef DataLabellingTool < handle
                 obj        {mustBeA(obj,"DataLabellingTool")}
                 plotName   {mustBeValidVariableName}
                 sensorName {mustBeValidVariableName}
-                col        double
+                col        
             end
 
             % Add plot from PlotManager
@@ -279,7 +307,7 @@ classdef DataLabellingTool < handle
                 obj      {mustBeA(obj,"DataLabellingTool")}
                 fileName string
             end
-            filePath          = fullfile(obj.LabelFolderPath,append(fileName,'.mat'));
+            filePath = fullfile(obj.LabelFolderPath,append(fileName,'.mat'));
             % Calling ErrorHandler if not a valid file
             if ~isfile(filePath); ErrorHandler.raiseError("InvalidFile", "DataLabellingTool", filePath).throwAsCaller; return; end
             FileHandler.loadLabel(obj, filePath);
@@ -307,8 +335,8 @@ classdef DataLabellingTool < handle
             if ~isfield(obj.Files.VideoFiles, fileName); ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Files.VideoFiles", fileName, fieldnames(obj.Files.VideoFiles)).throwAsCaller; return; end
             
             % File found
-            filePath   = obj.Files.VideoFiles.(fileName);
-            obj.vlc    = VLC;
+            filePath = obj.Files.VideoFiles.(fileName);
+            obj.vlc = VLC;
             obj.vlc.play(filePath);
             
             % Find offset

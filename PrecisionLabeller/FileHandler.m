@@ -51,11 +51,11 @@ classdef FileHandler < DataLabellingTool
         %             Note: tmpData is temporary Files section. 
         %                   It stores SensorFiles, VideoFiles, and ClassList
         %                   It is now tmp because SensorFiles and VideoFiles are
-        %                   not yet loaded in, it cannot be a full files section.
+        %                   not yet loaded in, it is incomplete.
         %                   tmpData will be passed into loadFiles() to load
         %                   SensorFiles and VideoFiles.
         function [LabelFolderPath, FilePaths, tmpData] = parseIniPaths(filePath, currentData)
-            disp(currentData)
+            tmpData = currentData;
             fileID  = fopen(filePath, 'r'); % fileID of input filepath
             
             % List of sections allowed
@@ -81,6 +81,7 @@ classdef FileHandler < DataLabellingTool
                     if strcmp(currentSection, 'ClassList'); tmpData.(currentSection) = containers.Map; continue; end
                     
                     % If [SensorFiles] or [VideoFiles], create section field with struct, continue next line
+                    if isfield(tmpData, currentSection); continue; end
                     tmpData.(currentSection) = struct(); continue;
                 end
                 
@@ -130,27 +131,28 @@ classdef FileHandler < DataLabellingTool
         %  Function : fetch parsed filepaths
         %             load available filepaths
         %
-        %  Output   : Files (SensorFiles, VideoFiles, ClassList)
+        %  Output   : Files (SensorFiles, VideoFiles)
         function Files = loadFiles(FilePaths, tmpData)
             sections = fieldnames(FilePaths);  % Get section names (e.g., [SensorFiles], [VideoFiles])
-        
+
             % Loop over each section (e.g., SensorFiles, VideoFiles)
             for i = 1:numel(sections)
                 sectionStruct = FilePaths.(sections{i});  % Get the struct of the current section
                 subFields = fieldnames(sectionStruct);    % Get the subfields (e.g., filenames)
-                
+
                 % Loop over each file in the section
                 for j = 1:numel(subFields)
                     filePath = sectionStruct.(subFields{j});  % Get the file path
                     tmpData = FileHandler.categorise(filePath, subFields{j}, tmpData);  % Categorize the file
                 end
+
             end
             
             Files = tmpData;  % Return the modified data
         end
 
             
-        %% Arguments: categorise(filePath, name, tmpData)
+        %% Arguments: categorise(filePath, name, tmpData, offset)
         %
         %  Function : load filepaths according to their file types
         %             add loaded data into tmpData
@@ -178,46 +180,100 @@ classdef FileHandler < DataLabellingTool
             
             % Check if the file is a sensor file (.csv, .xlsx, .mat)
             if ismember(ext, sensorFileTypes)
+                % If no SensorFiles section, create section
+                if ~isfield(tmpData, 'SensorFiles')
+                    tmpData.SensorFiles = struct();
+                end
+                % Debug message
                 disp(['Sensor file detected: ', filePath]);
-
+                % No specified name, default name to "SensorFile[NUM]"
                 if strcmpi(name, "")
                     try
+                        % "SensorFile[NUM]" 
+                        % where NUM is 1 higher than number of current imported files
                         name = append("SensorFile", string(numel(fieldnames(tmpData.SensorFiles)) + 1 ));
                     catch
+                        % When there are no imported files, set name to "SensorFile1"
                         name = "SensorFile1";
                     end
                 end
 
                 % Process .mat files
                 if strcmpi(ext, '.mat')
+                    % Load .mat as 'tmp'
                     tmp = load(filePath);
-                    tmpData.SensorFiles.(name) = tmp.Tbl;
+                    tables = fieldnames(tmp);
+                    % Loop over all data within tmp
+                    for i=1:numel(tables)
+                        tableName = tables{i};
+                        % Check for repeated names, throw warning; 
+                        % skip import
+                        if isfield(tmpData.SensorFiles, tableName)
+                            warning("%s already exist in SensorFiles.\n Data %s in '%s' is not imported.", tableName, tableName, filePath);
+                            continue
+                        end
+
+                        % Check for data that is not a table or timetable, throw warning; 
+                        % skip import
+                        if ~istable(tmp.(tableName)) && ~istimetable(tmp.(tableName))
+                            warning("%s is not a table nor a timetable.\n Data %s in '%s' is not imported.", tableName, tableName, filePath);
+                            continue
+                        end
+    
+                        % No Error, import into SensorFiles section
+                        tmpData.SensorFiles.(tableName) = tmp.(tableName);
+                    end
+                    % Debug display
                     disp(tmpData.SensorFiles);
-                    newData = tmpData;
+                    newData = tmpData; % return
                     return
                 end
 
                 % Process .csv, .xlsx
-                tmpData.SensorFiles.(name) = readtable(filePath, 'VariableNamingRule', 'preserve');
+                % Check for repeated names 
+                if isfield(tmpData.SensorFiles, name)
+                    % Already exist, throw warning; skip import
+                    warning("%s already exist in SensorFiles.\n '%s' is not imported", name, filePath);
+                else
+                    % Does no exist, import data
+                    tmpData.SensorFiles.(name) = readtable(filePath, 'VariableNamingRule', 'preserve');
+                end
+                % Debug display
                 disp(tmpData.SensorFiles);
-                newData = tmpData;
+                newData = tmpData; % return
                 return;
             end
 
             % Check if the file is a video file (.mp4, .MP4)
             if ismember(ext, videoFileTypes)
+                % If no VideoFiles section, create section
+                if ~isfield(tmpData, 'VideoFiles')
+                    tmpData.VideoFiles = struct();
+                end
+                % Debug message
                 disp(['Video file detected: ', filePath]);
-                
+                % No specified name, default name to "SensorFile[NUM]"
                 if strcmpi(name, "")
                     try
+                        % "VideoFile[NUM]" 
+                        % where NUM is 1 higher than number of current imported files
                         name = append("VideoFile", string( numel(fieldnames(tmpData.VideoFiles)) + 1 ));
                     catch
+                        % When there are no imported files, set name to "SensorFile1"
                         name = "VideoFile1";
                     end
                 end
 
                 % Process VideoFiles
-                tmpData.VideoFiles.(name) = filePath;
+                % Check for repeated names 
+                if isfield(tmpData.VideoFiles, name)
+                    % Already exist, throw warning; skip import
+                    warning("%s already exist in VideoFiles.\n '%s' is not imported", name, filePath);
+                else
+                    % Does no exist, import data
+                    tmpData.VideoFiles.(name) = filePath;
+                end
+                % Debug display
                 disp(tmpData.VideoFiles);
                 newData = tmpData;
                 return;
@@ -230,12 +286,14 @@ classdef FileHandler < DataLabellingTool
         %             overwrites current sensor labels to 'Undefined'
         %             Tests if caller.saveName is empty, prompts new file name
         function newLabelFile(caller)
+            % Declare local variables
             sensors     = caller.Sensors;
             sensorNames = fieldnames(caller.Sensors);
+            % For all sensors, create new NULL (class 0) labels
             for i=1:numel(sensorNames)
                 currentSensor = sensorNames{i};
-                sensors.(currentSensor).Label = zeros(height(sensors.(currentSensor)), 1);
-                sensors.(currentSensor).Class = repmat("Undefined", height(sensors.(currentSensor)), 1);
+                sensors.(currentSensor).Label = zeros(height(sensors.(currentSensor)), 1);               % Label Class
+                sensors.(currentSensor).Class = repmat("Undefined", height(sensors.(currentSensor)), 1); % Label Name
             end
         end
 
