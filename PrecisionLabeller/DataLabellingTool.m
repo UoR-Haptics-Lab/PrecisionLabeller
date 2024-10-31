@@ -212,7 +212,7 @@ classdef DataLabellingTool < handle
             % Check for input type
             % No specified file path, open GUI
             if numel(varargin) == 0
-                [fileName, dir] = uigetfile({'*.csv ;*.xlsx ;*.mat; *.mp4; *.MP4'}, 'MultiSelect', 'on');
+                [fileName, dir] = uigetfile({'*.csv; *.xlsx; *.mat; *.mp4; *.MP4'}, 'MultiSelect', 'on');
                 disp(fileName)
                 % fileName is a string if single selected
                 % fileName becomes a cell() if multiselected
@@ -281,10 +281,9 @@ classdef DataLabellingTool < handle
         end
        
         %% Usage(5): addSensors()           default Input: ALL SensorFiles
-        %            addSensors(sensorFile)
-        %            addSensors(sensorFile, newSensorName)
-        %            addSensors(sensorFile, sensorFileName, newSensorName)
-        %            addSensors(sensorFile, sensorFileName, newSensorName, columnsInFile)
+        %            addSensors(sensorFileName)
+        %            addSensors(sensorFileName, newSensorName)
+        %            addSensors(sensorFileName, newSensorName, columnsInFile)
         %
         % Function : add a new sensor to struct from specified columns of SensorFiles
         %            defaults to adding all SensorFiles as individual sensors
