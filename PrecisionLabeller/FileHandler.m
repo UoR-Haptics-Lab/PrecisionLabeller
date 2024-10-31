@@ -11,7 +11,7 @@ classdef FileHandler < DataLabellingTool
         %             Load .mat
         %
         % Output    : struct, format of DataLabellingTool
-        function obj = importFiles(filePath, currentData)
+        function obj = importFiles(caller, filePath, currentData)
             [~, ~, ext] = fileparts(filePath); % Extract file type
           
             % Processing .ini files
@@ -19,9 +19,9 @@ classdef FileHandler < DataLabellingTool
                 % Empty fields : DefaultFilePath, SaveFileName, Sensors, Plots
                 obj.DefaultFilePath = filePath; 
                 obj.SaveFileName    = ""; 
-                obj.Sensors         = struct();
-                obj.Plots           = struct();
-                obj.GroundTruth     = struct();
+                obj.Sensors         = caller.Sensors;
+                obj.Plots           = caller.Plots;
+                obj.GroundTruth     = caller.GroundTruth;
                 
                 % Loaded fields:LabelFolderPath, FilePaths, LoadedVersion, Files
                 %   Import filepaths parsing .ini file
@@ -93,7 +93,7 @@ classdef FileHandler < DataLabellingTool
                     
                     % Process 'Offset'
                     if strcmp(currentSection, 'Offset')
-                        tmpData.Offset.(key) = value; continue;
+                        tmpData.Offset.(key) = str2double(value); continue;
                     end
                 
                     % Process 'LabelFolder' 

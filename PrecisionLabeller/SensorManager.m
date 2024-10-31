@@ -17,6 +17,8 @@ classdef SensorManager < DataLabellingTool
                         sensorFileName = sensor{i};
                         currentStruct.(sensorFileName) = sensorFiles.(sensorFileName);                     % Copy to new struct
                         currentStruct.(sensorFileName) = convertTimeCol(currentStruct.(sensorFileName));   % Find time column automatically
+                        currentStruct.(sensorFileName).Properties.UserData{1} = sensorFileName;
+                        currentStruct.(sensorFileName).Properties.UserData{2} = 0;
                         currentStruct.(sensorFileName).Label = zeros(height(currentStruct.(sensorFileName)), 1);
                         currentStruct.(sensorFileName).Class = repmat("Undefined", height(currentStruct.(sensorFileName)), 1);
                     end
@@ -25,6 +27,8 @@ classdef SensorManager < DataLabellingTool
                     sensorFileName = varargin{1};
                     currentStruct.(sensorFileName) = sensorFiles.(sensorFileName);                     % Copy selected file to new struct
                     currentStruct.(sensorFileName) = convertTimeCol(currentStruct.(sensorFileName));   % Find time column automatically
+                    currentStruct.(sensorFileName).Properties.UserData{1} = sensorFileName;
+                    currentStruct.(sensorFileName).Properties.UserData{2} = sensorFileName;
                     currentStruct.(sensorFileName).Label = zeros(height(currentStruct.(sensorFileName)), 1);
                     currentStruct.(sensorFileName).Class = repmat("Undefined", height(currentStruct.(sensorFileName)), 1);
                 
@@ -35,6 +39,8 @@ classdef SensorManager < DataLabellingTool
                     newSensorName = varargin{2};
                     currentStruct.(newSensorName) = sensorFiles.(sensorFileName);                   % Copy selected file to new struct with new name
                     currentStruct.(newSensorName) = convertTimeCol(currentStruct.(newSensorName));  % Find time column automatically
+                    currentStruct.(newSensorName).Properties.UserData{1} = sensorFileName;
+                    currentStruct.(newSensorName).Properties.UserData{2} = sensorFileName;
                     currentStruct.(newSensorName).Label = zeros(height(currentStruct.(newSensorName)), 1);
                     currentStruct.(newSensorName).Class = repmat("Undefined", height(currentStruct.(newSensorName)), 1);
                 
@@ -51,6 +57,8 @@ classdef SensorManager < DataLabellingTool
                     end
                     % Find time column automatically
                     currentStruct.(newSensorName) = convertTimeCol(currentStruct.(newSensorName));
+                    currentStruct.(newSensorName).Properties.UserData{1} = sensorFileName;
+                    currentStruct.(newSensorName).Properties.UserData{2} = sensorFileName;
                     currentStruct.(newSensorName).Label = zeros(height(currentStruct.(newSensorName)), 1);
                     currentStruct.(newSensorName).Class = repmat("Undefined", height(currentStruct.(newSensorName)), 1);
                 otherwise
@@ -81,14 +89,21 @@ classdef SensorManager < DataLabellingTool
             end
         end
 
+        %% Arguments: normaliseTable(dataTable)
+        %
+        %  Function : convert duration columns into double
         function newTable = normaliseTable(dataTable)
+            % Declare local variables
             newTable = table();
             columns = fieldnames(dataTable);
+            % For all columns, find columns of duration
             for i=1:numel(columns)
-                if strcmp(columns{i}, 'Properties'); continue; end
-                if strcmp(columns{i}, 'Row'); continue; end
-                if strcmp(columns{i}, 'Variables'); continue; end
+                if strcmp(columns{i}, 'Properties'); continue; end % skip 'Properties'
+                if strcmp(columns{i}, 'Row'); continue; end        % skip 'Row'
+                if strcmp(columns{i}, 'Variables'); continue; end  % skip 'Variables'
+                % Check if column is duration with isduration()
                 if isduration(dataTable.(columns{i}))
+                    % convert duration to double with seconds()
                     tmp = seconds((dataTable.(columns{i})));
                     newTable.(columns{i}) = tmp;
                     continue;
@@ -115,21 +130,68 @@ classdef SensorManager < DataLabellingTool
             newStruct = rmfield(currentStruct,sensorName);
         end
         
+        %% Arguments: syncVideo(caller, sensorStruct, videoFileName)
+        %
+        %  Function : syncs all sensors to specified video
+        function syncVideo(caller, sensorStruct, videoFileName)
+            % Declare local variables
+            sensors = fieldnames(sensorStruct);
+            offset  = 0; % default offset
+
+            % For all sensors, check for dedicated offset of video
+            for i=1:numel(sensors)
+                % Declare local variable
+                syncedFile = sensorStruct.(sensors{i}).Properties.UserData{1};
+
+                % Find Offset with isfield()
+                % offset type 1 (VIDEONAME)
+                if isfield(caller.Files.Offset, videoFileName)
+                    offset = caller.Files.Offset.(videoFileName);
+                end
+                % offset type 2 (VIDEONAME_SENSORNAME)
+                if isfield(caller.Files.Offset, append(videoFileName, '_', syncedFile))
+                    offset = caller.Files.Offset.(append(videoFileName, '_', syncedFile));
+                end
+
+                % Change current offset to new found offset
+                caller.Sensors.(sensors{i}).Properties.UserData{2} = offset;
+
+                % Debug message
+                fprintf("[NOTE: Offset = VideoTime - DataTime]\n\n" + ...
+                    "Offset: %d for %s (According to Video File '%s')\n", ...
+                    offset, sensors{i}, videoFileName);
+            end
+        end
+
+        %% Arguments: changeTimeRow(caller, sensorName, newCol)
+        %
+        %  Function : change time column to specified column
         function changeTimeRow(caller, sensorName, newCol)
+            % Declare local variable
             sensor = caller.Sensors.(sensorName);
             timeCol = sensor.Properties.DimensionNames{1};
+
+            % If specified column is current time column, display, skip
             if strcmp(timeCol, newCol); disp(sensor(1:2,:)); return; end
+
+            % If specified column is not a duration, convert to duration
             if ~isduration(sensor.(newCol))
                 sensor.(newCol) = seconds(sensor.(newCol));
             end
+            % Convert current time column to double with seconds()
             tmp = seconds(sensor.(timeCol));
+
+            % Exchange columns new -> old; old -> new
             sensor.(timeCol) = sensor.(newCol);
             sensor.(newCol) = tmp;
 
+            % Rename exchaned columns
             sensor = renamevars(sensor, newCol, 'tmp');
             sensor.Properties.DimensionNames = {char(newCol), 'Variables'};
             sensor = renamevars(sensor, 'tmp', timeCol);
             caller.Sensors.(sensorName) = sensor;
+
+            % Debug display
             disp(sensor(1:2,:));
         end
     end

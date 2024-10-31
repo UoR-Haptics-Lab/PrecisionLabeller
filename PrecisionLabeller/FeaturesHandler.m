@@ -18,7 +18,7 @@ classdef FeaturesHandler < DataLabellingTool
 
             function copyPoints(a, b)
                 % Get the name of the current plot
-                currentPlot = a.Parent.Title.String;
+                currentPlot = a.Parent.UserData{1};
                 plotNames = fieldnames(caller.Plots);
 
                 % Store selectors and set up listeners for the current plot
@@ -68,36 +68,36 @@ classdef FeaturesHandler < DataLabellingTool
             % Function to update points and regions across all plots
             function updatePoint(point, ~, pointID, plotNames)
                 % Get the current plot and its sync file
-                currentPlot = point.Parent.Title.String;
-                syncFile = caller.Plots.(currentPlot).Handle.Name;
-                timeCol = caller.Sensors.(syncFile).Properties.DimensionNames{1};
-                localTime = caller.Sensors.(syncFile).(timeCol)(round(point.Position(1)));
+                currentPlot = point.Parent.UserData{1};
+                syncFile    = caller.Plots.(currentPlot).Handle.Name;
+                timeCol     = caller.Sensors.(syncFile).Properties.DimensionNames{1};
+                localTime   = caller.Sensors.(syncFile).(timeCol)(round(point.Position(1)));
 
                 % Update the synchronized points and regions across all plots
-                for j = 1:numel(plotNames)
+                for i = 1:numel(plotNames)
                     % Get time information for the other plot
-                    syncFile = caller.Plots.(plotNames{j}).Handle.Name;
+                    syncFile = caller.Plots.(plotNames{i}).Handle.Name;
                     timeCol = caller.Sensors.(syncFile).Properties.DimensionNames{1};
                     localTimeInOtherPlot = caller.Sensors.(syncFile).(timeCol);
                     [~, posX] = min(abs(localTimeInOtherPlot - localTime));
 
                     % Update the position of the corresponding point
-                    if ~strcmp(plotNames{j}, currentPlot)
-                        caller.Plots.(plotNames{j}).Selector.(pointID).Position(1) = posX;
-                        caller.Plots.(plotNames{j}).Selector.(pointID).Position(2) = point.Position(2);
+                    if ~strcmp(plotNames{i}, currentPlot)
+                        caller.Plots.(plotNames{i}).Selector.(pointID).Position(1) = posX;
+                        caller.Plots.(plotNames{i}).Selector.(pointID).Position(2) = point.Position(2);
                     end
 
                     % Delete the previous region if it exists
-                    if isfield(caller.Plots.(plotNames{j}).Selector, 'Region')
-                        delete(caller.Plots.(plotNames{j}).Selector.Region);
+                    if isfield(caller.Plots.(plotNames{i}).Selector, 'Region')
+                        delete(caller.Plots.(plotNames{i}).Selector.Region);
                     end
 
                     % Ensure the two points (A and B) are updated before recreating the region
-                    posA = caller.Plots.(plotNames{j}).Selector.A.Position(1);
-                    posB = caller.Plots.(plotNames{j}).Selector.B.Position(1);
+                    posA = caller.Plots.(plotNames{i}).Selector.A.Position(1);
+                    posB = caller.Plots.(plotNames{i}).Selector.B.Position(1);
 
                     % Recreate the region between the two points
-                    caller.Plots.(plotNames{j}).Selector.Region = xregion(caller.Plots.(plotNames{j}).Handle.CurrentAxes, posA, posB, 'FaceAlpha', 0.6);
+                    caller.Plots.(plotNames{i}).Selector.Region = xregion(caller.Plots.(plotNames{i}).Handle.CurrentAxes, posA, posB, 'FaceAlpha', 0.6);
                 end
             end
         end

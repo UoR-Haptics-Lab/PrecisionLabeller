@@ -8,119 +8,120 @@ classdef PlotManager < DataLabellingTool
         %  Function : plot new figure with given columns in sensor file
         %             initialises plot properties
         function addPlot(caller, plotName, sensorName, col, varargin)
-            %%% Local variables
+            % Declare local variables
             currentPlot = struct;
             sensor   = caller.Sensors.(sensorName);
             caller.EditFlag = false;
-
+            
+            %%% Choosing figure
             % Count existing figures
+            % Create new figure with one number higher than current count
             figureNum = numel(fieldnames(caller.Plots)) + 1;
 
-            % Plot in existing figure if plotName already exist
+            % Check if plot name already exist with isfield()
+            % If already exist, grab figure number
             if isfield(caller.Plots, plotName)
                 figureNum = caller.Plots.(plotName).Handle.Number;
             end
-
-            % Create new figure with number 1 higher than current count
-            currentPlot.Handle = figure(figureNum);
             
-            %%% Plotting new plot with data
+            % Create new figure with one number higher than current count
+            currentPlot.Handle = figure(figureNum);
+
+            %%% Plotting on chosen figure
             % Find variable names of given columns
             plotCol = sensor.Properties.VariableNames(col);
             
-            for i=1:numel(plotCol) % Loop all specified columns
+            % For all specified columns, plot
+            for i=1:numel(plotCol)
                 plot(sensor.(plotCol{i})); % Plot specified column
+                % Turn on hold at i=1
                 if i==1; hold on; end
             end
 
             % GroundTruth
-            % Only plot if label column is found in groundtruth
+            % Plot label column in current plot
+            % Set handle to currentPlot.GroundTruth
             currentPlot.GroundTruth = plot(sensor.Label);
             hold off;
 
             %%% Initialise all required properties
-            % Handle Properties
-            try [~,fileName,~] = fileparts(caller.vlc.Current.Meta.Filename); catch; fileName = ""; end
-
-            % default offset
-            offset = 0;
-            % offset type 1 (VIDEONAME_SENSORNAME)
-            if isfield(caller.Files.Offset,append(fileName, '_', sensorName))
-                offset = str2double(caller.Files.Offset.(append(fileName, '_', sensorName)));
-            end
-            % offset type 2 (VIDEONAME)
-            if isfield(caller.Files.Offset, fileName)
-                offset = str2double(caller.Files.Offset.(fileName));
-            end
-            % offset type 3 (VIDEONAME_SENSORFILENAME)
-            if numel(varargin) > 0
-                if isfield(caller.Files.Offset, varargin{1})
-                    offset = str2double(caller.Files.Offset.(append(fileName, '_', varargin{1})));
-                end
-            end
-
+            % General Properties
             currentPlot.Handle.Name        = sensorName;   % PlotName as sync file name
             currentPlot.Handle.Units       = "normalized"; % Normalised units to calculate mouse position
             currentPlot.Handle.UserData(1) = false;        % Mouse pressed (true: pressed, false: released)
             currentPlot.Handle.UserData(2) = 1;            % Calculated data point from axis and mouse pos
-            currentPlot.Handle.UserData(3) = offset;       % Offset from video time
-
+            
             % Indicator Properties
             currentPlot.Indicator               = xline(0, ...
                                                     'DisplayName','Indicator', ...      % Handle name
                                                     'Label',"00:00:00", ...             % Video time label
                                                     'LabelOrientation','horizontal' ... % Display as horizontal
                                                 );
-            currentPlot.Indicator.HitTest       = "off";     % Disable contact with mouse
-            currentPlot.Indicator.PickableParts = "none";    % Disable contact with mouse
-            currentPlot.Indicator.UserData(1)   = NaN;       % Prev datapoint
-            currentPlot.Indicator.UserData(2)   = 1;         % Current datapoint
-            currentPlot.Indicator.UserData(3)   = 0;         % Selected Class
+            currentPlot.Indicator.HitTest       = "off";   % Disable contact with mouse
+            currentPlot.Indicator.PickableParts = "none";  % Disable contact with mouse
+            currentPlot.Indicator.UserData(1)   = NaN;     % Prev datapoint
+            currentPlot.Indicator.UserData(2)   = 1;       % Current datapoint
+            currentPlot.Indicator.UserData(3)   = 0;       % Selected Class
 
             % Selector Properties
             currentPlot.Selector.A      = {};  % Point A selection
             currentPlot.Selector.B      = {};  % Point B selection
             currentPlot.Selector.Region = {};  % Region between point A and B
+            % Putting plotName to CurrentAxes UserData
+            % So that the ROI point has access to plotName
+            % Then FeaturesHandler will have access to the plots
+            currentPlot.Handle.CurrentAxes.UserData{1} = plotName;
 
             %%% KeyPressFcns
             % For Labelling
             currentPlot.Handle.KeyPressFcn           = @(~,event)LabelHandler.changeClass(caller, event.Key);
+            
             % For Seeking
             currentPlot.Handle.WindowButtonDownFcn   = @(src,~)PlotManager.mouseDownCallback(caller, src, currentPlot.Indicator);
             currentPlot.Handle.WindowButtonUpFcn     = @(src,~)PlotManager.mouseUpCallback(src);
             currentPlot.Handle.WindowButtonMotionFcn = @(src,~)PlotManager.mouseMotionCallback(caller, src, currentPlot.Indicator);
+            
             % For Deleting
             currentPlot.Handle.DeleteFcn             = @(~,~)removePlot(caller,plotName);
-            % Add zoom pan fix to initialised plot
-            % This is needed for labelling system
 
-            % When user pans, zooms, or use the annoying gui buttons,
-            % matlab changes its mode and locks all pre-configured
-            % KeyPressFcn. Now we want to edit the labels even if the mode has changed. 
+            % For fixing plot modes (needed for the real-time labelling system)
+            % When user pans, zooms, or use the gui buttons,
+            % matlab changes the figure's mode and locks all pre-configured
+            % KeyPressFcn.
+
+            % Ideally, we are able to edit the labels even if the mode has changed. 
+            % With this lock, we cannot.
+
             % So I have written this function to overwrite matlab's original local lock. 
             % Every time the figure sees our user using a new mode of
             % the figure, we revert the KeyPressFcn to what was set.
             PlotManager.zoomPanFixPlot(caller, currentPlot.Handle, plotName);
 
-            %%% General plot properties
-            title(plotName);
+            %%% Display Settings
+            % Title
+            title(strrep(plotName, '_','\_'));
+
             % Legend
             legendEntries = [plotCol, {'GroundTruth'}]; % Set last data as groundtruth label
             legend(legendEntries);
-            % Y-axis sort (Classlist is a hashmap)
+            
+            % Y-axis displaying ClassList
             keys          = caller.Files.ClassList.keys;
             values        = caller.Files.ClassList.values;
             [~, sortIdx]  = sort(str2double(keys));
-            % Convert keys into doubles individually, and sort them
-            % We need to use cellfunc so they are not combined into 1 number 
+            % For all keys (class numbers) within ClassList, convert to doubles
+            % Sort all converted keys (class numbers)
+            % Set y-axis tick according to the sorted keys (class numbers)
             yticks(sort(cellfun(@str2double, caller.Files.ClassList.keys)));
-            % Put sorted values as y-axis label
+            % Set y-axis labels on ticks according to the class values (class name)
             yticklabels(values(sortIdx));
+            % The y-axis should show the class name at the value of class number
             
-            % Return configured plot struct to main caller
+            % Return constructed plot back to DataLabellingTool
             caller.Plots.(plotName) = currentPlot;
-            % Calling thread function control timerFcn and linking axes            
-            caller.thread;
+            
+            % thread to control timerFcn and linking axes
+            caller.thread; % Calling DataLabellingTool
         end
 
         %% Arguments: removePlot(caller, plotName)
@@ -144,21 +145,26 @@ classdef PlotManager < DataLabellingTool
             % Add listener to monitor mode changes and restore KeyPressFcn
             caller.Plots.(plotName).listener{1} = addlistener(hManager, 'CurrentMode', 'PostSet', @(~, ~)updateKeyPressFcn());
 
-            % Nested function to pass inputs, so I dont have to pass it again
+            % Nested function to pass inputs
             function updateKeyPressFcn()
-                % Turn off warning telling me invalid property, 
-                % I think this happens when you change the mode too fast and
-                % the lock comes back before it finished restoring the KeyPressFcn.
+                % Turn off warning of invalid property, 
+                % The possible cause might be the mode is changed too fast
+                % Not fully tested, uncertain cause of warning
+                % But does not interfere with overall tool function
                 warning('off', 'MATLAB:modes:mode:InvalidPropertySet');
 
-                % Based on the solution described by Yair Altman at
+                % Based on solution described by Yair Altman at
                 % https://undocumentedmatlab.com/articles/enabling-user-callbacks-during-zoom-pan
                 % The below method is adapted from his approach.
 
+                % Check for current mode change with isempty()
                 if ~isempty(hManager.CurrentMode)
                     % Disable window listener handle that interferes with KeyPressFcn
                     [hManager.WindowListenerHandles.Enabled] = deal(false);
                     % Restore the KeyPressFcn for the plot
+                    % Setting thrid cell with previously assigned functions
+                    % 3rd cell so that it does not interfere with MatLab
+                    % built-in mode functions
                     Handle.KeyPressFcn{3} = @(~,event)LabelHandler.changeClass(caller, event.Key);
                 end
             end
@@ -166,54 +172,56 @@ classdef PlotManager < DataLabellingTool
 
         %% Arguments: updateIndicator(caller, videoTime)
         %
-        %  Function : updateIndicator UserData
-        %             Position indicator according to synced file
-        %             Calls update Label to update ground truth 
+        %  Function : updates the Indicator's UserData
+        %             and updates the Indicator's position
+        %             Calls updateLabel to update ground truth 
         %             if user is editing
         function updateIndicator(caller, videoTime)
             % Disable warning
-            % The warning happens sometimes because the
-            % plot is being deleted or vlc is being disconnected
+            % The possible is plot plot is being deleted or vlc is being disconnected
             % so the indicator is gone, we cannot read/write data onto the
-            % indicator, but matlab doesnt know its being deleted
-            % rather than detecting if a plot is being deleted, 
-            % it is easier to turn the warning off
+            % indicator, but at the instant the indicator still exist
+            % Not fully test, uncertain cause of warning
+            % But does not interfere with overall tool function
             warning('off', 'MATLAB:callback:PropertyEventError');
-
             % Declare variables
             plotStruct = caller.Plots;
             plotNames = fieldnames(plotStruct);
-            if numel(plotNames) == 0; return; end % Do nothing if no plots
+
+            % If no available plots, do nothing
+            if numel(plotNames) == 0; return; end
 
             % For all plots, update indicator properties
             for i=1:numel(plotNames)
-                % Declare local variables
+                %%% Declare local variables
                 currentPlot = plotStruct.(plotNames{i});
                 sensorName  = currentPlot.Handle.Name;
                 sensor      = caller.Sensors.(sensorName);
                 timeCol     = sensor.Properties.DimensionNames{1};
                 dataTime    = sensor.(timeCol);
 
-                % Calculate times
+                %%% Calculate times
                 % Data Time = Video Time - Offset
-                % UserData(3) from fig handle holds our offset
-                approxDataTime       = videoTime - currentPlot.Handle.UserData(3);
+                % Sensor's UserData{2} is their respective offset
+                approxDataTime       = videoTime - sensor.Properties.UserData{2};
                 videoTimeNorm        = seconds(videoTime);
                 videoTimeNorm.Format = ('hh:mm:ss.SSS');
                 
-                % Calculate actual data point with nearest neightbor method
+                % Calculate actual data point with nearest neighbour method
                 [~, dataPoint] = min(abs(seconds(dataTime) - approxDataTime));
                 
-                % Write new properties
+                %%% Write new properties
                 currentPlot.Indicator.Label       = string(videoTimeNorm);
-                currentPlot.Indicator.UserData(2) = dataPoint;
+                % Overwrite Indicator.UserData(2) (current data point) to new calculated point
+                currentPlot.Indicator.UserData(2) = dataPoint; % Overwrite data
+                % If NOT Handler.UserData(1) (Mouse is released), change indicator value
                 if ~currentPlot.Handle.UserData(1); currentPlot.Indicator.Value = dataPoint; end
                 
                 % If edit mode is off, stop here
                 if ~caller.EditFlag; continue; end
-                % % indicator UserData(3) is selected Class (i.e. class 1,2,3...7 so on)
-                LabelHandler.updateLabel(caller, sensorName, currentPlot.Indicator.UserData);
-                PlotManager.updateLabel(caller);
+                % Indicator UserData(3) is selected Class (i.e. class 1,2,3..)
+                LabelHandler.updateLabel(caller, sensorName, currentPlot.Indicator.UserData); % Calling LabelHandler
+                PlotManager.updateLabel(caller); % update label display in plots
             end
         end
 
@@ -224,27 +232,37 @@ classdef PlotManager < DataLabellingTool
         %             updates whole plot if theres a new label file loaded
         %             updates section of plot if user is editing
         %             varargin to determine edit mode or not
-        function updateLabel(caller, varargin)
+        function updateLabel(caller, editFull)
+            arguments
+                caller
+                editFull boolean = 0 % Indicating edit whole plot, or only specified section
+            end
+            % Declare local variables
             plotStruct = caller.Plots;
             plotNames  = fieldnames(plotStruct);
 
+            % For all plots, update label plot
             for i=1:numel(plotNames)
                 % Declare local variables
                 syncFile = plotStruct.(plotNames{i}).Handle.Name;
                 
-                if numel(varargin) < 1
-                    A = plotStruct.(plotNames{i}).Indicator.UserData(1);
-                    B = plotStruct.(plotNames{i}).Indicator.UserData(2);
-                else
-                    A = 1;
-                    B = height(caller.Sensors.(syncFile));
+                % If editFull is false, range is set by indicator values
+                if editFull == 0
+                    past = plotStruct.(plotNames{i}).Indicator.UserData(1);
+                    now  = plotStruct.(plotNames{i}).Indicator.UserData(2);
+                end
+
+                % If editFull is true, range is set by size of sensor file
+                if editFull == 1
+                    past = 1;
+                    now = height(caller.Sensors.(syncFile));
                 end
                 
-                % Do nothing if rewinding
-                if B < A; continue; end
+                % If rewinding, do nothing
+                if now < past; continue; end
 
                 % Declare sync range as past to now
-                syncRange = A:B;
+                syncRange = past:now;
                     
                  % Skip if invalid sync range
                 if syncRange(1) == 0; continue; end
@@ -255,74 +273,81 @@ classdef PlotManager < DataLabellingTool
         end
 
         %% Arguments: mouseDownCallback(caller, handle)
-        %             (LEFT CLICK)
+        %             (LEFT CLICK DOWN)
         %
-        %  Function : calculate relative mouse position in figure
+        %  Function : set mouse has clicked down
+        %             calculate relative mouse position in figure
         %             calculate data point from mouse position
-        %             
         function mouseDownCallback(caller, handle, indicator)
-            % Do nothing if vlc is not on
+            % If VLC is off, skip
             if isempty(caller.vlc); return; end
-            % Double check if vlc is connected, do nothing if not
+            % Double check if video is nothing playing, skip
             try isempty(caller.vlc.Current); catch; return; end
-            mousePos = get(handle, 'CurrentPoint');      % Get mouse pos in figure
+
+            % Get Positions
+            mousePos = get(handle, 'CurrentPoint');         % Get mouse pos in figure
             axPos    = get(handle.CurrentAxes, 'Position'); % Get axis pos in figure
 
-            % If mouse is out of plot area, say mouse is not clicked
+            % If mouse is out of plot area, mouse click is not registered
             if ~(mousePos(1) >= axPos(1) && mousePos(1) <= axPos(3) && mousePos(2) >= axPos(2) && mousePos(2) <= axPos(4))
                 handle.UserData(1) = false;
                 return
             end
 
             %%% UserData, if mouse is in plot area
-            % Mouse down event
+            % Mouse down event to true
             handle.UserData(1) = true;
             % Calculate data point from mouse pos
             dataPoint       = PlotManager.dataPointfromMousePos(handle);
             indicator.Value = dataPoint;
-            % If data point out of bounds, do nothing
+            % If data point is out of bounds, do nothing
             if (dataPoint < 1) || (dataPoint > height(caller.Sensors.(handle.Name))); return; end
-            % else, that is your data point the mouse is at
+            % else, that is your data point (where the mouse is)
             handle.UserData(2) = dataPoint;
             
-            %%% Seek to valid data point in video
-            PlotManager.seekVideo(caller, handle.Name, dataPoint, handle.UserData(3));
-        end
-
-        %% Arguments: mouseUpCallback(handle)
-        %             (LEFT CLICK)
-        %
-        %  Function : say mouse is released
-        function mouseUpCallback(handle)
-            % UserData(1): true if mouse pressed, false if mouse released
-            handle.UserData(1) = false;
+            %%% Seek to valid time in video
+            % Sensor UserData{2} holds offset
+            PlotManager.seekVideo(caller, handle.Name, dataPoint, caller.Sensors.(handle.Name).Properties.UserData{2});
         end
 
         %% Arguments: mouseMotionCallback(caller, handle)
-        %             (LEFT CLICK)
+        %             (LEFT CLICK HOLD)
         %
-        %  Function : 
+        %  Function : move indicator to mouse position, if left mouse is held down
+        %             update indicator properties
         function mouseMotionCallback(caller, handle, indicator)
             % Skip if mouse is released
             if ~handle.UserData(1); return; end
             % Skip if vlc is not on
             if isempty(caller.vlc); return; end
-            % Double check if vlc is connected, do nothing if not
+            % Double check if video is playing
+            % If not, do nothing
             try isempty(caller.vlc.Current); catch; return; end
 
             % Calculate data point from mouse pos
             dataPoint = PlotManager.dataPointfromMousePos(handle);
-            % Skip if mouse is out of bounds in x-axis
-            % Continue reading if mouse is only out of y-axis bounds
+            % If data point is out of bounds, do nothing
             if (dataPoint < 1) || (dataPoint > height(caller.Sensors.(handle.Name))); return; end
-            handle.UserData(2) = dataPoint; % Store new dataPoint
+            % else, that is your data point (where the mouse is)
+            handle.UserData(2) = dataPoint;
+            % put indicator to wherever the mouse is
             indicator.Value = dataPoint;
-            % Seek to valid datapoint
-            PlotManager.seekVideo(caller, handle.Name, dataPoint, handle.UserData(3));
+
+            %%% Seek to valid time in video
+            % Sensor UserData{2} holds offset
+            PlotManager.seekVideo(caller, handle.Name, dataPoint, caller.Sensors.(handle.Name).Properties.UserData{2});
+        end
+
+        %% Arguments: mouseUpCallback(handle)
+        %             (LEFT CLICK UP)
+        %
+        %  Function : set mouse has released
+        function mouseUpCallback(handle)
+            % UserData(1): true if mouse pressed, false if mouse released
+            handle.UserData(1) = false;
         end
 
         %% Arguments: dataPointfromMousePos(handle)
-        %             (LEFT CLICK)
         %
         %  Function : returns possible datapoint the mouse is touching
         %             NOTE: There must be a better way to write this
@@ -336,18 +361,20 @@ classdef PlotManager < DataLabellingTool
             
             % Convert the mouse position to the normalized position within the axes
             axPos = get(handle.CurrentAxes, 'Position');
-            % If mouse pos not out of bounds in x-axis
+            % If mouse pos is NOT out of x-axis bounds
             if ~(mousePos(1) >= axPos(1) && mousePos(1) <= axPos(3))
                 dataPoint = handle.UserData(2);
                 return
             end
 
-            % Calculate the X data range and normalized X position
+            % Calculate the X data range and normalised X position
             xLimits   = get(handle.CurrentAxes, 'XLim');
             normX     = (mousePos(1) - axPos(1)) / axPos(3);
+            % normalised means reperesent points as precentages in decimals
 
-            % Calculate the actual X data value on the normalized position
+            % Calculate the actual X data value on the normalised position (percentages)
             dataPoint = normX * (xLimits(2) - xLimits(1)) + xLimits(1);
+            % dataPoint = percentage * range + lowerLimit
         end
 
         %% Arguments: seekVideo(caller, sensorName, dataPoint)

@@ -12,20 +12,45 @@
 %   VLC.m
 
 % All Publicly Accessible Methods
+%% Instantiator
 %   init()
+
+%% Deconstructor
+%   quit(obj)
+
+%% Files
 %   loadFiles(obj, filePath)
 %   import(obj, varargin)
-%   removeFiles(fileName)
+%   removeFiles(obj, fileName)
 %   savePreset(obj, fileName)
+
+%% Sensors
 %   addSensors(obj, varargin)
 %   removeSensors(obj, sensorName)
+%   changeTimeRow(obj, sensorName, newCol)
+
+%% Change Properties
+%   changeSaveName(obj)
+%   changeLabelFolder(obj)
+
+%% Offset
+%   changeOffset(obj, videoName, offset, varargin)
+%   removeOffset(obj, name)
+
+%% Plots
 %   plot(obj, plotName, sensorName, col)
 %   removePlot(obj, plotName)
+
+%% Label Files
 %   newLabelFile(obj)
 %   loadLabelFile(obj, fileName)
 %   saveLabelFile(obj)
+
+%% Videos
 %   play(obj, fileName)
-%   quit(obj)
+%   syncVideo(obj, fileName)
+
+%% Features
 %   select(obj)
 %   deselect(obj)
 %   edit(obj)
@@ -62,14 +87,18 @@ classdef DataLabellingTool < handle
     
     %% Protected Properties, Not writable nor readable to users
     %  Transient to exclude from saving in .mat
+    % Listeners are declared from 'd.init'
     properties (Access = protected, Transient = true)
-        Listeners       cell      = {}           % Observers for callback from different changes
+        Listeners                            % Observers for callback from different changes
     end
 
     %% (Private) Constructor
     methods (Access = private)
         % Restricts creating new instance
         function obj = DataLabellingTool()
+            % Declare listeners for this new obj
+            obj.Listeners{1} = addlistener(obj, 'LoadedVersion','PostSet', @(~, ~)PlotManager.updateLabel(obj, 1));
+            obj.Listeners{2} = addlistener(obj, 'Time','PostSet', @(~, ~)PlotManager.updateIndicator(obj, obj.Time));
             % Set default Thread as timer function
             obj.Thread = timer( ...
                 'ExecutionMode', 'fixedRate', ...
@@ -77,7 +106,7 @@ classdef DataLabellingTool < handle
                 'Period', 0.05, ...
                 'TimerFcn', @(~, ~)update(obj), ...
                 'Name', 'UpdateVideoTime');
-            % Fixed rate timer calls obj.update every 0.01s
+            % Fixed rate timer calls obj.update every 0.05s
             % Name:     UpdateVideoTime
             % Function: Fetch current VLC video time in SECONDS if VLC
             %           avaiable. Defaults to 0s if no connection.
@@ -91,20 +120,60 @@ classdef DataLabellingTool < handle
         % Function : Allows creating singleton instance 
         %            without calling constructor
         function obj = init()
-             persistent uniqueInstance % Current instance
-             % IF no instance has been created
-             if isempty(uniqueInstance) || ~isvalid(uniqueInstance)
-                obj = DataLabellingTool(); % Output new instantiated instance
+            persistent uniqueInstance % Current instance
+            
+            % Create new instance if none is created
+            % Check if instance already exist
+            if isempty(uniqueInstance) || ~isvalid(uniqueInstance)
+                % If no instance was available
+                obj = DataLabellingTool(); % Instantiate DataLabellingTool
                 uniqueInstance = obj;      % Store new instance as current instance
-             % ELSE create new instance
-             else
-                obj = uniqueInstance;  % Return current instance
-             end                           
+                return
+            end
+            obj = uniqueInstance;  % Return current instance
         end
     end
 
     %% (Public) Methods
     methods
+        %% Usage    : quit()
+        %
+        %  Function : deletes DataLabellingTool (Deconstructor)
+        %             close all plots
+        %             deletes all added timers
+        %             deletes all variables in base workspace that points to DataLabellingTool
+        function quit(obj)
+            % Delete Plots
+            evalin('base', 'close all');
+            pause(1);   % Wait for plots to close
+            
+            % Delete timer objects
+            % Try stop timers, if available
+            try evalin('base', "stop(timerfind('Name','UpdateVideoTime'))"); catch; end
+            evalin('base', "delete(timerfind('Name','UpdateVideoTime'))");
+            
+            % Delete DataLabellingTool
+            delete(obj);
+            % Delete variables that point to DataLabellingTool
+            var = evalin('base', 'who');
+            % For all related variables, delete
+            for i = 1:numel(var)
+                % Find related variables
+                class = evalin('base', sprintf('whos(''%s'').class', var{i}));
+                % If related to DataLabellingTool, delete
+                if strcmp(class, "DataLabellingTool")
+                    % Delete variable by "clear [VAR]"
+                    evalin('base', sprintf('clear %s', var{i}));
+                    
+                    % Debug message
+                    fprintf('Variable "%s" pointing at DataLabellingTool is deleted.\n', var{i});
+                end
+            end
+            
+            % Debug message
+            disp('DataLabellingTool has been deleted.');
+        end
+
         %% Usage(2): loadFiles()             default Input: "default.ini"
         %          : loadFiles(filePath)
         %
@@ -112,15 +181,13 @@ classdef DataLabellingTool < handle
         %            Parse an .ini and load corresponding filepaths
         %            Load a .mat and load corresponding variables
         function loadFiles(obj, filePath)
+            % Argument validation to set default
             arguments (Input)
                 obj      {mustBeA(obj,"DataLabellingTool")}
                 filePath {mustBeFile} = "default.ini" % Default filepath as "default.ini"
-            end
-            % Clean current listeners
-            if ~isempty(obj.Listeners); cellfun(@delete,obj.Listeners); end
-            
+            end            
             % Return newly constructed obj
-            loadedObj = FileHandler.importFiles(filePath, obj.Files); % Calling FileHandler
+            loadedObj = FileHandler.importFiles(obj, filePath, obj.Files); % Calling FileHandler
             % Overwrite current properties
             obj.DefaultFilePath = loadedObj.DefaultFilePath;
             obj.FilePaths       = loadedObj.FilePaths;
@@ -130,11 +197,7 @@ classdef DataLabellingTool < handle
             obj.Sensors         = loadedObj.Sensors;
             obj.Plots           = loadedObj.Plots;
             obj.GroundTruth     = loadedObj.GroundTruth;
-            % Declare new listeners for newly constructed properties
-            obj.Listeners{1}    = addlistener(obj, 'LoadedVersion','PostSet', @(~, ~)PlotManager.updateLabel(obj));
-            obj.Listeners{2}    = addlistener(obj, 'Time','PostSet', @(~, ~)PlotManager.updateIndicator(obj, obj.Time));
-            
-            % Display current obj
+            % Debug display
             disp(obj);
         end
         
@@ -144,27 +207,37 @@ classdef DataLabellingTool < handle
         % Function : import specified files into respective fields according
         %            to the file type
         function import(obj, varargin)
+            % varargin is used, for if the user wants to import multiple file paths.
+            
+            % Check for input type
             % No specified file path, open GUI
             if numel(varargin) == 0
                 [fileName, dir] = uigetfile({'*.csv ;*.xlsx ;*.mat; *.mp4; *.MP4'}, 'MultiSelect', 'on');
+                disp(fileName)
+                % fileName is a string if single selected
+                % fileName becomes a cell() if multiselected
+                % dir is a string, 
+                % NOTE: this folder path should apply to all files since uigetfile only allows selecting within same folder.
             % Received specified file paths
             else
                 dir = "";
                 fileName = varargin;
+                % fileName is a cell(), even if there's only 1 input
+                % dir is nothing, it depends on user input (varargin)
             end
             
-            % Single File Import
+            % Single File Import (from uigetfile)
             if ~iscell(fileName)
-                filePath = fullfile(dir, fileName);
-                obj.Files = FileHandler.categorise(filePath, "", obj.Files);
+                filePath = fullfile(dir, fileName); % Create full file path
+                obj.Files = FileHandler.categorise(filePath, "", obj.Files); % Calling FileHandler
                 return
             end
             
-            % Multiple File Import
+            % Multiple File Import (from uigetfile or varargin)
+            % For all input file paths, let FileHandler handle it
             for i=1:numel(fileName)
-                filePath = fullfile(dir, fileName{i});
-                try name = fileName{i}; catch; name = ""; end
-                obj.Files = FileHandler.categorise(filePath, name, obj.Files);
+                filePath = fullfile(dir, fileName{i}); % Create full file path
+                obj.Files = FileHandler.categorise(filePath, fileName{i}, obj.Files); % Calling FileHandler
             end
         end
         
@@ -172,15 +245,23 @@ classdef DataLabellingTool < handle
         %
         % Function : remove specified imported files from DataLabellingTool
         function removeFiles(obj, fileName)
-            fields = fieldnames(obj.Files);
+            % Declare all fieldnames
+            fields = fieldnames(obj.Files); % It's a cell()
+            
+            % For all fields in d.Files, search for given fileName, remove first found
             for i=1:numel(fields)
+                % Found field matching fileName
                 if isfield(obj.Files.(fields{i}), fileName)
+                    % Remove field by rmfield()
                     obj.Files.(fields{i}) = rmfield(obj.Files.(fields{i}), fileName);
+                    
+                    % Debug messages
                     fprintf("Current %s: \n", fields{i});
                     disp(obj.Files.(fields{i}));
-                    return
+                    return % Stop search
                 end
             end
+
             % File name not found, throw error
             ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Files", fileName, [fieldnames(obj.Files.SensorFiles) fieldnames(obj.Files.VideoFiles)]).throw;
         end
@@ -191,6 +272,7 @@ classdef DataLabellingTool < handle
         % Function : saves current instance properties in given fileName
         %            saves file as 'CURRENT_FOLDER/FILENAME_dd-MM-yyyy_HH-mm-ss.mat'
         function savePreset(obj, fileName)
+            % Argument validation to set default
             arguments
                 obj      {mustBeA(obj,"DataLabellingTool")}
                 fileName string = "preload" % Default file Name as "preload"
@@ -208,10 +290,38 @@ classdef DataLabellingTool < handle
         %            defaults to adding all SensorFiles as individual sensors
         %            if no input is given
         function addSensors(obj, varargin)
-            obj.Sensors = SensorManager.addSensors(obj.Sensors, obj.Files.SensorFiles, varargin{:});
-            disp("Current Sensors:"); % Display new struct
+            obj.Sensors = SensorManager.addSensors(obj.Sensors, obj.Files.SensorFiles, varargin{:}); % Calling SensorManager
+            
+            % Debug display
+            disp("Current Sensors:");
+            disp(obj.Sensors);
+            
+            % Sync offsets to respective sensors according to 1st Imported Video
+            % Get the first video file name
+            firstVideoFile = fieldnames(obj.Files.VideoFiles);
+            SensorManager.syncVideo(obj, obj.Sensors, firstVideoFile{1}); % Calling SensorManager
+            
+            % Debug message
+            fprintf("All Sensors are now synced to Video File '%s'.\n", firstVideoFile{1});
+        end
+
+        %% Usage   : removeSensors(sensorName)
+        %
+        % Function : removes a sensor from Sensor struct
+        %            returns new Sensors struct
+        function removeSensors(obj, sensorName)
+            % Argument Validation to check for valid sensorName
+            arguments
+                obj        {mustBeA(obj,"DataLabellingTool")}
+                sensorName {mustBeText}
+            end
+            obj.Sensors = SensorManager.removeSensors(obj.Sensors,sensorName); % Calling SensorManager
+            
+            % Debug display
+            disp("Current Sensors:");
             disp(obj.Sensors);
         end
+        
 
         %% Usage   : changeTimeRow()
         %
@@ -224,33 +334,120 @@ classdef DataLabellingTool < handle
         %
         % Function : changes save file name of tool
         function changeSaveName(obj)
+            % Debug message
             fprintf("\nCurrent Save File Name: %s\n", obj.SaveFileName)
+
+            % Prompt for new name, check for validity by isvarname
             saveName = input("Enter New Save Name: ","s");
-            
             % Not a valid variable name, throw error
             if ~isvarname(saveName)
                 ErrorHandler.raiseError("InvalidFileName", "DataLabellingTool", saveName).throw;
                 return;
             end
-
+            % A valid name, change current save name
             obj.SaveFileName = saveName;
+            
+            % Debug display 
             disp(obj);
         end
 
-        %% Usage   : removeSensors(sensorName)
+        %% Usage   : changeLabelFolder()
         %
-        % Function : removes a sensor from Sensor struct
-        %            returns new Sensors struct
-        function removeSensors(obj, sensorName)
-            arguments
-                obj        {mustBeA(obj,"DataLabellingTool")}
-                sensorName {mustBeText}
+        % Function : change label (output) folder of tool
+        function changeLabelFolder(obj)
+            % Debug message
+            fprintf("\nCurrent Save File Folder: %s\n", obj.LabelFolderPath)
+
+            % Prompt for new folder, check validity by isfolder()
+            folderPath = input("Enter New Folder Path: ","s");
+            % Not a valid folder path, throw error
+            if ~isfolder(folderPath)
+                ErrorHandler.raiseError("InvalidFolder", "DataLabellingTool", folderPath).throw;
+                return;
             end
-            obj.Sensors = SensorManager.removeSensors(obj.Sensors,sensorName); % Calling SensorManager
-            disp("Current Sensors:"); % Display new struct
-            disp(obj.Sensors);
+            % Valid folder path, change current folder path
+            obj.LabelFolderPath = folderPath;
+
+            % Debug display
+            disp(obj);
         end
-        
+
+        %% Usage   : changeOffset(videoName, varargin)
+        %
+        % Function : change offset for specific video
+        function changeOffset(obj, videoName, offset, varargin)
+            % Argument Validation to check input argument type
+            arguments
+                obj       {mustBeA(obj,"DataLabellingTool")}
+                videoName string
+                offset    double
+            end
+            % Repeating validation for varargin
+            arguments (Repeating)
+                varargin % SensorName, only 1 input is allowed
+            end
+            sensorName = varargin; % For readability
+
+            % Check for valid imported video file name by isfield()
+            % Not a valid video, throw error
+            if ~isfield(obj.Files.VideoFiles, videoName)
+                ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "VideoFiles", videoName, fieldnames(obj.Files.VideoFiles)).throw;
+                return;
+            end
+            
+            % Check if only 1 input is given
+            % Check for valid imported sensor file name by isfield()
+            if numel(sensorName) == 1
+                % Not a valid sensor, throw error
+                if ~isfield(obj.Files.SensorFiles, sensorName{1})
+                    ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "SensorFiles", sensorName{1}, fieldnames(obj.Files.SensorFiles)).throw;
+                    return;
+                end
+                
+                % Valid sensor (and video), set offset in d.Files.Offset as 
+                % VIDEONAME_SENSORNAME = offset
+                obj.Files.Offset.(append(videoName, '_', varargin{1})) = offset;
+
+                % Debug message
+                fprintf("\nCurrent Offsets: \n")
+                disp(obj.Files.Offset); % display
+
+                % Sync video to all sensors after changing
+                obj.syncVideo(videoName);
+                return
+            end
+
+            % No input sensor name is given, change offset directly
+            % VIDEONAME = offset
+            obj.Files.Offset.(videoName) = offset;
+
+            % Debug message
+            fprintf("\nCurrent Offsets: \n")
+            disp(obj.Files.Offset); % display
+
+            % Sync video to all sensors after changing
+            obj.syncVideo(videoName);
+        end
+
+        %% Usage   : removeOffset(name)
+        %
+        % Function : removes an offset from Offset struct
+        function removeOffset(obj, name)
+            % Check if input name is valid offset field by isfield()
+            % Not a valid offset field, throw error
+            if ~isfield(obj.Files.Offset, name)
+                ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Offset", name, fieldnames(obj.Files.Offset)).throw;
+                return;
+            end
+
+            % Valid field, remove field by rmfield()
+            obj.Files.Offset = rmfield(obj.Files.Offset, name);
+            
+            % Debug message
+            fprintf("\nCurrent Offsets: \n")
+            disp(obj.Files.Offset); % display
+        end
+
         %% Usage   : plot(plotName, sensorName, columns)
         %            (Note: columns in 'Sensors' to be plotted)
         %
@@ -258,17 +455,16 @@ classdef DataLabellingTool < handle
         %            initiate all required data in a plot
         %            including userdata, listeners, callback functions
         function plot(obj, plotName, sensorName, col)
+            % Argument Validation to check for input names
             arguments
                 obj        {mustBeA(obj,"DataLabellingTool")}
                 plotName   {mustBeValidVariableName}
                 sensorName {mustBeValidVariableName}
-                col        
+                col
             end
-
-            % Add plot from PlotManager
             PlotManager.addPlot(obj, plotName, sensorName, col); % Calling PlotManager
 
-            % Display new plot struct
+            % Debug display
             disp("Current Plots:");
             disp(obj.Plots);
         end
@@ -283,6 +479,8 @@ classdef DataLabellingTool < handle
                 plotName {mustBeValidVariableName}
             end
             PlotManager.removePlot(obj,plotName); % Calling PlotManager
+
+            % Debug display
             disp("Current Plots:");
             disp(obj.Plots);
         end
@@ -292,9 +490,6 @@ classdef DataLabellingTool < handle
         %  Function : creates a new ground truth file
         %             for starting up the first time
         function newLabelFile(obj)
-            arguments
-                obj {mustBeA(obj,"DataLabellingTool")}
-            end
             FileHandler.newLabelFile(obj); % Calling FileHandler
         end
 
@@ -307,19 +502,23 @@ classdef DataLabellingTool < handle
                 obj      {mustBeA(obj,"DataLabellingTool")}
                 fileName string
             end
+            % Declare full file path
             filePath = fullfile(obj.LabelFolderPath,append(fileName,'.mat'));
-            % Calling ErrorHandler if not a valid file
-            if ~isfile(filePath); ErrorHandler.raiseError("InvalidFile", "DataLabellingTool", filePath).throwAsCaller; return; end
-            FileHandler.loadLabel(obj, filePath);
+
+            % Check for valid file path with isfile()
+            % If not a valid file path, throw error
+            if ~isfile(filePath)
+                ErrorHandler.raiseError("InvalidFile", "DataLabellingTool", filePath).throwAsCaller
+                return
+            end
+
+            FileHandler.loadLabel(obj, filePath); % Calling FileHandler
         end
 
         %% Usage    : saveLabelFile()
         %
         %  Function : save the instantaneous ground truth into a .mat file
         function saveLabelFile(obj)
-            arguments
-                obj {mustBeA(obj,"DataLabellingTool")}
-            end
             FileHandler.saveFile(obj, obj.GroundTruth, obj.SaveFileName, obj.LabelFolderPath); % Calling FileHandler
         end
 
@@ -327,71 +526,35 @@ classdef DataLabellingTool < handle
         %
         %  Function : plays the specified video file
         function play(obj, fileName)
+            % Argument Validation to check for file name type
             arguments
                 obj     {mustBeA(obj,"DataLabellingTool")}
                 fileName string
             end
-            % File not found, Throw error
-            if ~isfield(obj.Files.VideoFiles, fileName); ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Files.VideoFiles", fileName, fieldnames(obj.Files.VideoFiles)).throwAsCaller; return; end
+            % Check for valid imported video file by isfield()
+            % Not a valid video, throw error
+            if ~isfield(obj.Files.VideoFiles, fileName)
+                ErrorHandler.raiseError("InvalidField", "DataLabellingTool", "Files.VideoFiles", fileName, fieldnames(obj.Files.VideoFiles)).throwAsCaller
+                return
+            end
             
-            % File found
+            % Valid video, play video path with VLC
             filePath = obj.Files.VideoFiles.(fileName);
             obj.vlc = VLC;
             obj.vlc.play(filePath);
             
-            % Find offset
-            currentPlots = obj.Plots;
-            plotNames = fieldnames(currentPlots);
-            % Loop overplots
-            for i=1:numel(plotNames)
-                % If offset is named VIDEONAME_PLOTNAME, 
-                % then offset is assigned to current PLOTNAME plot
-                % iterate to next plot
-                if isfield(obj.Files.Offset,append(fileName, '_', currentPlots.(plotNames{i}).Handle.Name))
-                    currentPlots.(plotNames{i}).Handle.UserData(3) = str2double(obj.Files.Offset.(append(fileName,'_',currentPlots.(plotNames{i}).Handle.Name)));
-                    continue
-                end
-                
-                % If offset is named VIDEONAME, 
-                % then offset is assigned to current plot
-                % iterate to next plot
-                if isfield(obj.Files.Offset, fileName)
-                    currentPlots.(plotNames{i}).Handle.UserData(3) = str2double(obj.Files.Offset.(fileName));
-                    continue
-                end
-                
-                % No offset configured, default to 0
-                currentPlots.(plotNames{i}).Handle.UserData(3) = 0;
-            end
-
-            % Calls thread to start or stop thread
+            % Calling thread to start or stop thread
             obj.thread;
         end
 
-        %% Usage    : quit()
+        %% Usage   : syncVideo()
         %
-        %  Function : deletes DataLabellingTool
-        %             close all plots
-        %             deletes all added timers
-        %             deletes all variables in base workspace that points to DataLabellingTool
-        function quit(obj)
-            delete(obj.Thread);
-            % Delete Plots
-            evalin('base', 'close all');
-            % Delete timers
-            try evalin('base', "stop(timerfind('Name','UpdateVideoTime'))"); catch; end
-            evalin('base', "delete(timerfind('Name','UpdateVideoTime'))");
-            % Delete DataLabellingTool
-            delete(obj);
-            var = evalin('base', 'who');
-            for i = 1:numel(var)
-                class = evalin('base', sprintf('whos(''%s'').class', var{i}));
-                if strcmp(class, "DataLabellingTool")
-                    evalin('base', sprintf('clear %s', var{i}));
-                    fprintf('Variable "%s" pointing at DataLabellingTool is deleted.\n', var{i});
-                end
-            end
-            disp('DataLabellingTool has been deleted.');
+        % Function : syncs all sensors to specified video
+        function syncVideo(obj, fileName)
+            SensorManager.syncVideo(obj, obj.Sensors, fileName); % Calling SensorManager
+            
+            % Debug message
+            fprintf("All Sensors are now synced to Video File '%s'.\n", fileName);
         end
 
         %% Usage    : select()
@@ -401,9 +564,13 @@ classdef DataLabellingTool < handle
         %             also highlights region between roi points with gray
         %             to indicate selection
         function select(obj)
+            % Stop real-time editing
             obj.EditFlag = false;
-            try obj.deselect; catch; end % deselect() if roi points already exist
-            if numel(fieldnames(obj.Plots)) == 0; return; end % exit if no available plots
+            % Try deselect ROI points if available, else do nothing
+            try obj.deselect; catch; end
+            % If no available plots, do nothing
+            if numel(fieldnames(obj.Plots)) == 0; return; end
+
             FeaturesHandler.selector(obj); % Calling FeaturesHandler
         end
 
@@ -420,6 +587,7 @@ classdef DataLabellingTool < handle
         %             prompt for label and change region between two roi
         %             points to given label
         function edit(obj)
+            % Stop real-time editing
             obj.EditFlag = false;
             class = input("Enter Class: "); % Prompt for label
             LabelHandler.manualEdit(obj, class); % Calling LabelHandler
@@ -431,8 +599,10 @@ classdef DataLabellingTool < handle
         %             to base workspace as a variable
         %             exported sensors does not affect imported files
         function exportFeatures(obj)
+            % Get all sensor names
             sensors = fieldnames(obj.Sensors);
-            for i=1:numel(sensors) % For all sensors, save file to base workspace
+            % For all sensors, save file to base workspace
+            for i=1:numel(sensors)
                 FileHandler.saveFile(obj, obj.Sensors.(sensors{i}), sensors{i}); % Calling FileHandler
                 assignin('base', sensors{i}, obj.Sensors.(sensors{i})); % Export to base workspace
             end
@@ -449,29 +619,31 @@ classdef DataLabellingTool < handle
         %             doesn't run on a listener, runs as a single-shot
         %             function
         function thread(obj)
+            % Declare local variables
             plotStruct = obj.Plots;
             plotName   = fieldnames(obj.Plots);
-            % No plots and running thread
+
+            % Check for conditions
+            % CASE 1: No plots and running thread
             if (numel(plotName) < 1) && obj.Flag
                 stop(obj.Thread)
                 obj.Flag = false; % flag stopped thread
                 return
             end
             
-            % Stopped thread
+            % CASE 2: Stopped thread
             if ~obj.Flag
                 start(obj.Thread);
                 obj.Flag = true; % flag started thread
             end
-            
-            % More than 1 plot
+            % CASE 2 EXTEND: If more than 1 plot available
             if (numel(plotName) > 1)
                 % Create array of axes object
                 axes = zeros(numel(plotName),1);
+                % For all plots, add CurrentAxes to axes array
                 for i=1:numel(plotName)
-                    currentPlot = plotStruct.(plotName{i});
                     % Add axes of plots to axes array
-                    axes(i) = currentPlot.Handle.CurrentAxes;
+                    axes(i) = plotStruct.(plotName{i}).Handle.CurrentAxes;
                 end
                 % Link all axes from array
                 linkaxes(axes,'x');
@@ -485,11 +657,20 @@ classdef DataLabellingTool < handle
         %             Double check if vlc is connected, do nothing if not
         %             Updates current video time and store into the Time property
         function update(obj)
-            if isempty(obj.vlc); return; end % Skip if no video
-            try if isempty(obj.vlc.Current); return; end; catch; return; end % Double check skip if no video
+            % If no video, do nothing
+            if isempty(obj.vlc); return; end
+             % Double check If no video playing, do nothing
+            try if isempty(obj.vlc.Current); return; end; catch; return; end
+
+            % Video available, fetch current time
+            % divide by 1e6 because it is in microseconds
             videoTimeSec = obj.vlc.Current.Position / 1e6;
-            if obj.Time == videoTimeSec; return; end % Skip if same video time
+            % If video time has not changed, do nothing
+            if obj.Time == videoTimeSec; return; end
+            
+            % If video time changed, change d.Time
             obj.Time = videoTimeSec;
+            % obj.Time decides the when the indicator updates
         end
     end
 end

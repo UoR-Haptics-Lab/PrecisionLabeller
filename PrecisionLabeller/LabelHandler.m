@@ -8,14 +8,15 @@ classdef LabelHandler < DataLabellingTool
         %  Function : add new sensors to given sensor struct
         %             allows option to define sensor names, select sensor file, and pick columns
         function changeClass(caller, key)
-            % 'o' keyboard for start editing
+            % Check for keyboard press
+            % 'o' key to start editing
             if strcmpi(key,'o')
                 caller.EditFlag = true;
                 disp("Real-time Edit Mode: ON")
                 return
             end
 
-            % 'p' keyboard for stop editing
+            % 'p' key to stop editing
             if strcmpi(key,'p')
                 caller.EditFlag = false;
                 disp("Real-time Edit Mode: OFF");
@@ -46,9 +47,11 @@ classdef LabelHandler < DataLabellingTool
                 % Find sensor name, and write label to sensor timetable
                 sensorName = currentPlot.Handle.Name;
                 LabelHandler.updateLabel(caller, sensorName, currentIndicator.UserData);
+
+                % Debug display
                 disp(caller.Sensors.(sensorName)(currentIndicator.UserData(2), end-1:end));
             end
-            % save current edit
+            % Save current edit
             FileHandler.saveFile(caller, caller.GroundTruth, caller.SaveFileName, caller.LabelFolderPath);
         end
 
@@ -58,6 +61,8 @@ classdef LabelHandler < DataLabellingTool
         function updateLabel(caller, sensorName, indicatorUserData)
             persistent pastTime;
             persistent nowTime;
+            persistent videoPast;
+            persistent videoNow;
     
             % Available sensors
             sensorList = fieldnames(caller.Sensors);
@@ -68,10 +73,13 @@ classdef LabelHandler < DataLabellingTool
             key  = indicatorUserData(3);
     
             % Find sensor time according to index from sensors
-            sensorRef = caller.Sensors.(sensorName);
-            timeCol   = sensorRef.Properties.DimensionNames{1};
-            pastTime  = seconds(sensorRef.(timeCol)(past));
-            nowTime   = seconds(sensorRef.(timeCol)(now));
+            sensor    = caller.Sensors.(sensorName);
+            offset    = sensor.Properties.UserData{2};
+            timeCol   = sensor.Properties.DimensionNames{1};
+            pastTime  = seconds(sensor.(timeCol)(past));
+            nowTime   = seconds(sensor.(timeCol)(now));
+            videoPast = pastTime + offset; % VideoTime = DataTime + Offset
+            videoNow  = nowTime + offset;
             
             % If current time is before recorded time, skip
             if now < past; return; end
@@ -83,7 +91,10 @@ classdef LabelHandler < DataLabellingTool
             % Loop over sensors
             for i=1:numel(sensorList)
                 currentSensor = caller.Sensors.(sensorList{i});
-                timeCol = currentSensor.Properties.DimensionNames{1};
+                offsetRef     = currentSensor.Properties.UserData{2};
+                timeColRef    = currentSensor.Properties.DimensionNames{1};
+                pastTimeRef   = videoPast - offsetRef;
+                nowTimeRef    = videoNow - offsetRef;
                 
                 % If current plot is selected plot, range is recorded idx to current idx
                 if strcmpi(sensorList{1},sensorName)
@@ -91,14 +102,8 @@ classdef LabelHandler < DataLabellingTool
                 else
                     % If current plot is other plots, 
                     % find closest possible recorded time and current time
-                    [~,newPast] = min(abs(seconds(currentSensor.(timeCol)) - pastTime));
-                    [~,newNow] = min(abs(seconds(currentSensor.(timeCol)) - nowTime));
-                    % There is a fundamental error with this finding time logic.
-                    % It assumes all sensors have the same offset and that
-                    % they start at the same exact time.
-                    % We need to change how one sensor relates to another
-                    % through by applying an offset before calculating
-                    % the nearest-neighbor time.
+                    [~,newPast] = min(abs(seconds(currentSensor.(timeColRef)) - pastTimeRef));
+                    [~,newNow] = min(abs(seconds(currentSensor.(timeColRef)) - nowTimeRef));
                     range = newPast:newNow;
                 end
                 
@@ -117,35 +122,40 @@ classdef LabelHandler < DataLabellingTool
             if ~isKey(caller.Files.ClassList, string(key)); return; end
             % Declare local variables
             plotStruct = caller.Plots;
-            plotNames = fieldnames(caller.Plots);
-            firstPlot = plotStruct.(plotNames{1});
+            plotNames  = fieldnames(caller.Plots);
+            firstPlot  = plotStruct.(plotNames{1});
             sensorName = firstPlot.Handle.Name;
             sensorList = fieldnames(caller.Sensors);
+            offset     = caller.Sensors.(sensorName).Properties.UserData{2};
 
             % Find sync file
             syncFile = firstPlot.Handle.Name;
             % Find time column in sync file
-            timeCol = caller.Sensors.(syncFile).Properties.DimensionNames{1};
+            timeCol  = caller.Sensors.(syncFile).Properties.DimensionNames{1};
             % Declare column as a variable, for ease
             syncTime = caller.Sensors.(syncFile).(timeCol);
             
             % Positions of roi points
             posA = round(firstPlot.Selector.A.Position(1));
             posB = round(firstPlot.Selector.B.Position(1));
+            videoPast = syncTime(posA) + offset;
+            videoNow = syncTime(posB) + offset;
 
             for i=1:numel(sensorList)
-                
                 currentSensor = caller.Sensors.(sensorList{i});
-                timeCol = currentSensor.Properties.DimensionNames{1};
+                timeColRef = currentSensor.Properties.DimensionNames{1};
+                offsetRef = currentSensor.Properties.UserData{2};
                 
-                if strcmpi(sensorList{i},sensorName)
+                if strcmpi(sensorList{i}, sensorName)
                     % If current plot is selected plot, range is same
                     range = round(min(posA,posB):max(posA,posB));
                 else
+                    pastTimeRef   = videoPast - offsetRef;
+                    nowTimeRef    = videoNow - offsetRef;
                     % If current plot is another plot, find time with
                     % nearest-neighbor
-                    [~,newA] = min(abs(seconds(currentSensor.(timeCol)) - seconds(syncTime(posA))));
-                    [~,newB] = min(abs(seconds(currentSensor.(timeCol)) - seconds(syncTime(posB))));
+                    [~,newA] = min(abs(seconds(currentSensor.(timeColRef)) - seconds(pastTimeRef)));
+                    [~,newB] = min(abs(seconds(currentSensor.(timeColRef)) - seconds(nowTimeRef)));
                     % Again, logic error, we cannot assume they start at
                     % the same time and have the same offset
                     range = newA:newB;
