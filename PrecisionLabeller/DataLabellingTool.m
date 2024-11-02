@@ -1,4 +1,7 @@
 %% DatalabellingTool.m
+% Written by David Chui
+% Version == 1.4.0
+
 % Type               : Main Class (Central controller of tool)
 % Singleton Design   : Does not create new instances when calling constructor
 % Facade Design      : Covers complicated logic in main class
@@ -36,6 +39,10 @@
 %% Offset
 %   changeOffset(obj, videoName, offset, varargin)
 %   removeOffset(obj, name)
+
+%% ClassList
+%   changeClassList(obj, key, value)
+%   removeClassList(obj, key)
 
 %% Plots
 %   plot(obj, plotName, sensorName, col)
@@ -295,6 +302,11 @@ classdef DataLabellingTool < handle
             disp("Current Sensors:");
             disp(obj.Sensors);
             
+            % Check if there are VideoFiles
+            % if Not, skip
+            if ~isfield(obj.Files, "VideoFiles"); return; end
+            if isempty(fieldnames(obj.Files.VideoFiles)); return; end
+            
             % Sync offsets to respective sensors according to 1st Imported Video
             % Get the first video file name
             firstVideoFile = fieldnames(obj.Files.VideoFiles);
@@ -447,6 +459,41 @@ classdef DataLabellingTool < handle
             disp(obj.Files.Offset); % display
         end
 
+        function changeClassList(obj, key, value)
+            % Argument Validation to check for input type
+            arguments
+                obj
+                key   {mustBeNumeric}
+                value string
+            end
+            % Check if ClassList has initiated
+            % if Not, create field
+            if ~isfield(obj.Files, "ClassList")
+                obj.Files.ClassList = containers.Map;
+            end
+            
+            % Add given input to ClassList
+            obj.Files.ClassList(string(key)) = value;
+            
+            % Debug message
+            fprintf("Current ClassList: \n");
+            disp(obj.Files.ClassList.keys);   % display
+            disp(obj.Files.ClassList.values); % display
+        end
+
+        function removeClassList(obj, key)
+            % Argument validation on key, numeric
+            arguments
+                obj
+                key   {mustBeNumeric}
+            end
+            obj.Files.ClassList = remove(obj.Files.ClassList, string(key));
+
+            % Debug message
+            fprintf("Current ClassList: \n");
+            disp(obj.Files.ClassList.keys);   % display
+            disp(obj.Files.ClassList.values); % display
+        end
         %% Usage   : plot(plotName, sensorName, columns)
         %            (Note: columns in 'Sensors' to be plotted)
         %
