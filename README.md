@@ -15,9 +15,11 @@ Data are referenced to each other using a nearest-neighbor interpolation method.
 
 ## Installation
 1. Ensure MATLAB version 2020a or higher is installed.
-2. Ensure latest version of VLC is installed.
-3. Open MATLAB and navigate to the `Data Labelling Tool (David)` folder.
-4. Open `default.ini` and type in the required file paths for all sections. (Check Usage/Examples in `README.me` for instructions)
+2. Ensure latest version of VLC is installed. (e.g. >> v=VLC();v.play('somevideo.mpg')) 
+    - matlab-vlc from https://gitlab.com/leastrobino/matlab-vlc
+    - jason_decode from https://gitlab.com/leastrobino/matlab-json
+4. Open MATLAB and navigate to the `Data Labelling Tool (David)` folder.
+5. Open `default.ini` and type in the required file paths for all sections. (Check Usage/Examples in `README.me` for instructions)
 
 ## Usage/Examples
 Before initial startup, the `default.ini` file must be configured.\
