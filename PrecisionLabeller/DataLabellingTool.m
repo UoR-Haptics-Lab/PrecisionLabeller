@@ -68,6 +68,7 @@
 classdef DataLabellingTool < handle
     %% Public properties, Not writable by users
     properties (SetAccess = protected, SetObservable = true) % Oberservable for listeners
+        Version         char      = "1.4.1"
         DefaultFilePath char      = ""           % Default .ini file path
         FilePaths       struct    = struct()     % Struct for all file paths referenced in default.ini
         Files           struct    = struct()     % Data loaded from DataPath

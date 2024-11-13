@@ -235,7 +235,7 @@ classdef PlotManager < DataLabellingTool
         function updateLabel(caller, editFull)
             arguments
                 caller
-                editFull boolean = 0 % Indicating edit whole plot, or only specified section
+                editFull = 0 % Indicating edit whole plot, or only specified section
             end
             % Declare local variables
             plotStruct = caller.Plots;
