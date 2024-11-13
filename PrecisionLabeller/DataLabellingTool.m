@@ -1,6 +1,6 @@
 %% DatalabellingTool.m
 % Written by David Chui
-% Version == 1.4.0
+% Version == 1.4.1
 
 % Type               : Main Class (Central controller of tool)
 % Singleton Design   : Does not create new instances when calling constructor
